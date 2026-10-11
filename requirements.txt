@@ -1,0 +1,5 @@
+# Application (backend + inference). No PyTorch needed.
+numpy>=1.26
+opencv-python-headless>=4.8
+scipy>=1.11
+pillow>=10.0
