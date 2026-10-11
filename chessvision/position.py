@@ -1,4 +1,4 @@
-"""Position representation, FEN and legality checks.
+"""Position representation, FEN, legality checks and probability-based repair.
 
 A board is an 8x8 list of strings in board coordinates:
 board[0][0] = a8, board[0][7] = h8, board[7][0] = a1, board[7][7] = h1.
@@ -11,6 +11,8 @@ is fully under our control (and easy to test).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+import numpy as np
 
 # Class order shared by the model and the rest of the pipeline.
 CLASSES = [".", "P", "N", "B", "R", "Q", "K", "p", "n", "b", "r", "q", "k"]
@@ -228,3 +230,98 @@ def full_fen(board: Board, side_to_move: str = "w", castling: str | None = None)
     if castling is None:
         castling = infer_castling(board)
     return f"{board_to_fen(board)} {side_to_move} {castling} - 0 1"
+
+
+# --------------------------------------------------------------------------
+# Repair based on model probabilities
+# --------------------------------------------------------------------------
+
+
+def _ranked(probs_row: np.ndarray) -> list[int]:
+    return list(np.argsort(-probs_row))
+
+
+def repair(board_probs: np.ndarray, max_changes: int = 6) -> tuple[Board, list[dict]]:
+    """Build the most likely *legal* board from (8, 8, 13) probabilities.
+
+    Greedy: start from the argmax and, while a rule is broken, change the square
+    whose change "costs" the least (the smallest drop in log-probability).
+    Returns the board and a list of changes {square, from, to, reason}, where
+    reason is a code (pawn_back_rank, extra_king, missing_king, too_many_pawns)
+    translated by the frontend.
+    """
+    probs = np.clip(board_probs.astype(np.float64), 1e-9, 1.0)
+    logp = np.log(probs)
+    board: Board = [[CLASSES[int(np.argmax(probs[r, c]))] for c in range(8)] for r in range(8)]
+    changes: list[dict] = []
+
+    def set_sq(r: int, c: int, new: str, why: str) -> None:
+        old = board[r][c]
+        board[r][c] = new
+        changes.append({"square": square_name(r, c), "from": old, "to": new, "reason": why})
+
+    def best_alternative(r: int, c: int, forbidden: set[str]) -> tuple[str, float]:
+        cur = logp[r, c, CLASS_INDEX[board[r][c]]]
+        for idx in _ranked(probs[r, c]):
+            cand = CLASSES[idx]
+            if cand not in forbidden and cand != board[r][c]:
+                return cand, cur - logp[r, c, idx]
+        return EMPTY, float("inf")
+
+    for _ in range(max_changes * 4):
+        if len(changes) >= max_changes:
+            break
+        fixed = False
+
+        # 1) Pawns on the first or eighth rank.
+        for r in (0, 7):
+            for c in range(8):
+                if board[r][c] in ("P", "p"):
+                    alt, _ = best_alternative(r, c, {"P", "p"})
+                    set_sq(r, c, alt, "pawn_back_rank")
+                    fixed = True
+        if fixed:
+            continue
+
+        # 2) Exactly one king per colour.
+        for king in ("K", "k"):
+            squares = find_piece(board, king)
+            if len(squares) > 1:
+                # Keep the most confident one and replace the rest with their best alternative.
+                squares.sort(key=lambda rc: -logp[rc[0], rc[1], CLASS_INDEX[king]])
+                for r, c in squares[1:]:
+                    alt, _ = best_alternative(r, c, {king})
+                    set_sq(r, c, alt, "extra_king")
+                fixed = True
+            elif not squares:
+                ki = CLASS_INDEX[king]
+                cost = np.full((8, 8), np.inf)
+                for r in range(8):
+                    for c in range(8):
+                        if board[r][c] in ("K", "k"):
+                            continue
+                        cost[r, c] = logp[r, c, CLASS_INDEX[board[r][c]]] - logp[r, c, ki]
+                r, c = np.unravel_index(int(np.argmin(cost)), cost.shape)
+                set_sq(int(r), int(c), king, "missing_king")
+                fixed = True
+        if fixed:
+            continue
+
+        # 3) Too many pawns of one colour: remove the least confident.
+        for pawn in ("P", "p"):
+            squares = find_piece(board, pawn)
+            if len(squares) > 8:
+                squares.sort(key=lambda rc: logp[rc[0], rc[1], CLASS_INDEX[pawn]])
+                r, c = squares[0]
+                alt, _ = best_alternative(r, c, {pawn})
+                set_sq(r, c, alt, "too_many_pawns")
+                fixed = True
+        if not fixed:
+            break
+
+    return board, changes
+
+
+def uncertain_squares(board_probs: np.ndarray, threshold: float = 0.6) -> list[str]:
+    conf = board_probs.max(axis=-1)
+    return [square_name(r, c) for r in range(8) for c in range(8) if conf[r, c] < threshold]
