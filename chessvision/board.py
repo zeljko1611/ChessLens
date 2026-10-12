@@ -1,7 +1,16 @@
 """Chessboard detection with classical computer vision (no ML).
 
-Quadrilateral candidates are found from edges and adaptive thresholds; each one
-is searched for the 8x8 checkerboard grid and its corners are refined locally.
+Main approach (robust to pieces covering the board):
+1. Find "X" points, where four squares meet. They are intensity saddle points
+   (negative Hessian determinant), searched at several scales.
+2. RANSAC: a hypothesis is a single square (a point, two neighbours and the
+   fourth point), grown step by step into the whole lattice (a homography fitted
+   to more and more nodes). The lattice with the most matching nodes wins.
+3. Choose which 9x9 window of that lattice is the board (node count plus the
+   checkerboard contrast inside versus outside the board).
+
+Fallback (if 1-3 fail): quadrilateral contours, a search for the 8x8 grid
+inside each, and local corner refinement.
 
 The result is the four corners of the playing area in image coordinates,
 clockwise from the top-left (TL, TR, BR, BL). Which corner is which square
@@ -202,7 +211,230 @@ def refine_corners(gray: np.ndarray, corners: np.ndarray, iters: int = 3) -> tup
     return corners, best
 
 
-def detect_board(image: np.ndarray) -> BoardDetection | None:
+# --------------------------------------------------------------------------
+# Main approach: inner "X" corners of the grid + RANSAC
+# --------------------------------------------------------------------------
+# Points where four squares meet are intensity saddle points (negative Hessian
+# determinant). Pieces hide some of them, but enough remain to fit the
+# homography of a regular grid. This is far more robust than contours when
+# pieces on the back rank break the outline of the board.
+
+
+def saddle_points(gray: np.ndarray, max_points: int = 400) -> np.ndarray:
+    g = gray.astype(np.float32)
+    pts, resp_all = [], []
+    for sigma in (1.5, 2.5, 4.0):
+        s = cv2.GaussianBlur(g, (0, 0), sigma)
+        gxx = cv2.Sobel(s, cv2.CV_32F, 2, 0, ksize=3)
+        gyy = cv2.Sobel(s, cv2.CV_32F, 0, 2, ksize=3)
+        gxy = cv2.Sobel(s, cv2.CV_32F, 1, 1, ksize=3)
+        resp = -(gxx * gyy - gxy * gxy) * sigma**4  # scale normalisation
+        resp[resp < 0] = 0
+        win = max(5, int(3 * sigma) | 1)
+        local_max = resp == cv2.dilate(resp, np.ones((win, win), np.uint8))
+        thr = np.percentile(resp, 99.5)
+        ys, xs = np.nonzero(local_max & (resp > max(thr, 1e-6)))
+        pts.append(np.stack([xs, ys], 1))
+        resp_all.append(resp[ys, xs])
+    if not pts:
+        return np.zeros((0, 2), np.float32)
+    P = np.concatenate(pts).astype(np.float32)
+    R = np.concatenate(resp_all)
+    order = np.argsort(-R)
+    kept: list[np.ndarray] = []
+    for i in order:  # merge nearby points found at different scales
+        if all(np.abs(P[i] - k).max() > 4 for k in kept):
+            kept.append(P[i])
+        if len(kept) >= max_points:
+            break
+    return np.array(kept, np.float32)
+
+
+def _node_matches(H: np.ndarray, pts: np.ndarray, tol: float, radius: float = 99.0) -> tuple[np.ndarray, np.ndarray]:
+    """The closest point to every grid node (if it is close enough).
+    Returns (node coordinates, image points)."""
+    g = cv2.perspectiveTransform(pts[None], np.linalg.inv(H))[0]
+    rounded = np.round(g)
+    dev = np.abs(g - rounded).max(axis=1)
+    ok = (dev < tol) & (np.abs(rounded - 0.5).max(axis=1) < radius)
+    best: dict[tuple[int, int], int] = {}
+    for i in np.nonzero(ok)[0]:
+        key = (int(rounded[i, 0]), int(rounded[i, 1]))
+        if key not in best or dev[i] < dev[best[key]]:
+            best[key] = i
+    idx = np.array(list(best.values()), int)
+    if len(idx) == 0:
+        return np.zeros((0, 2), np.float32), np.zeros((0, 2), np.float32)
+    return rounded[idx].astype(np.float32), pts[idx]
+
+
+def _grow_lattice(H: np.ndarray, pts: np.ndarray) -> np.ndarray | None:
+    """A single-square hypothesis is only accurate locally (perspective, noise).
+    So it is grown step by step: take the nodes near that square, re-estimate
+    the homography (with RANSAC, since pieces also produce saddle points),
+    then widen the radius."""
+    q = cv2.perspectiveTransform(np.array([[[0, 0], [1, 0], [0, 1]]], np.float32), H)[0]
+    size0 = float(np.linalg.norm(q[1] - q[0]) + np.linalg.norm(q[2] - q[0])) / 2
+    for radius, tol in ((1.6, 0.25), (3.2, 0.2), (6.5, 0.15), (99, 0.12)):
+        try:
+            nodes, img_pts = _node_matches(H, pts, tol, radius)
+        except np.linalg.LinAlgError:
+            return None
+        if len(nodes) < 6:
+            return H if radius > 2 else None
+        H_new, _ = cv2.findHomography(nodes, img_pts, cv2.RANSAC, 0.12 * size0)
+        if H_new is None or abs(np.linalg.det(H_new)) < 1e-12:
+            return H
+        # Guard against a degenerate solution (a tiny grid that "fits" everything).
+        if not 0.6 < _cell_size(H_new, img_pts) / size0 < 1.6:
+            return None
+        H = H_new
+    return H
+
+
+def _cell_size(H: np.ndarray, pts: np.ndarray) -> float:
+    """Average square side length (in pixels) around the centroid of the points."""
+    c = cv2.perspectiveTransform(pts.mean(axis=0, keepdims=True)[None], np.linalg.inv(H))[0, 0]
+    q = cv2.perspectiveTransform(np.array([[c, c + [1, 0], c + [0, 1]]], np.float32), H)[0]
+    return float(np.linalg.norm(q[1] - q[0]) + np.linalg.norm(q[2] - q[0])) / 2
+
+
+def _reduce_basis(H: np.ndarray, pts: np.ndarray) -> np.ndarray:
+    """The same lattice can be described by a skewed basis, e.g. (1,0) and (1,1).
+    Lagrange-Gauss reduction picks the shortest vectors, which are the square
+    sides, so the grid axes match the rows and columns of the board."""
+    c = cv2.perspectiveTransform(pts.mean(axis=0, keepdims=True)[None], np.linalg.inv(H))[0, 0]
+    base = np.array([[c, c + [1, 0], c + [0, 1]]], np.float32)
+    img_pts = cv2.perspectiveTransform(base, H)[0]
+    b1, b2 = img_pts[1] - img_pts[0], img_pts[2] - img_pts[0]
+    T = np.eye(2)  # columns: the new basis vectors in old coordinates
+    for _ in range(20):
+        if b2 @ b2 < b1 @ b1:
+            b1, b2 = b2, b1
+            T = T[:, ::-1].copy()
+        mu = round(float(b1 @ b2) / float(b1 @ b1))
+        if mu == 0:
+            break
+        b2 = b2 - mu * b1
+        T[:, 1] -= mu * T[:, 0]
+    A = np.eye(3)
+    A[:2, :2] = T
+    return H @ A
+
+
+def ring_score(gray: np.ndarray, H: np.ndarray, x0: int, y0: int, cell: int = 16) -> float:
+    """Inside the board neighbouring squares differ; just outside it (frame,
+    table) they do not. Comparing the outer ring of board squares with the ring
+    just outside picks the right position when the border lines have no saddle
+    points."""
+    size = 10 * cell
+    grid = np.array([[x0 - 1, y0 - 1], [x0 + 9, y0 - 1], [x0 + 9, y0 + 9], [x0 - 1, y0 + 9]], np.float32)
+    src = cv2.perspectiveTransform(grid[None], H)[0]
+    dst = np.array([[0, 0], [size, 0], [size, size], [0, size]], np.float32)
+    warped = cv2.warpPerspective(gray, cv2.getPerspectiveTransform(src, dst), (size, size), flags=cv2.INTER_AREA, borderMode=cv2.BORDER_REPLICATE)
+    m = 2
+    v = np.median(warped.astype(np.float32).reshape(10, cell, 10, cell)[:, m:-m, :, m:-m].transpose(0, 2, 1, 3).reshape(10, 10, -1), axis=2)
+
+    def ring_alternation(k: int) -> float:
+        # Neighbour differences along the ring at distance k from the edge of the 10x10 window.
+        a, b = k, 9 - k
+        diffs = np.concatenate([
+            np.abs(np.diff(v[a, a : b + 1])), np.abs(np.diff(v[b, a : b + 1])),
+            np.abs(np.diff(v[a : b + 1, a])), np.abs(np.diff(v[a : b + 1, b])),
+        ])
+        return float(np.median(diffs))
+
+    return ring_alternation(1) - ring_alternation(0)
+
+
+def _place_window(gray: np.ndarray, H: np.ndarray, pts: np.ndarray) -> tuple[float, np.ndarray] | None:
+    """For a lattice, find where exactly the 8x8 board is (which 9x9 line window).
+    Returns (score = node count + ring correction, corners)."""
+    nodes, img_pts = _node_matches(H, pts, 0.12)
+    if len(nodes) < 8:
+        return None
+    # Inner corners are always saddle points, border corners only if the frame
+    # differs from the squares. The 9x9 window with the most nodes wins; among
+    # near ties the ring around the board decides.
+    xs, ys = nodes[:, 0].astype(int), nodes[:, 1].astype(int)
+    options = []
+    for x0 in range(xs.min() - 8, xs.max() + 1):
+        for y0 in range(ys.min() - 8, ys.max() + 1):
+            inside = (xs >= x0) & (xs <= x0 + 8) & (ys >= y0) & (ys <= y0 + 8)
+            if inside.sum() >= 8 and len(np.unique(xs[inside])) >= 4 and len(np.unique(ys[inside])) >= 4:
+                options.append((int(inside.sum()), x0, y0, inside))
+    if not options:
+        return None
+    top = max(o[0] for o in options)
+    best: tuple[float, float, np.ndarray] | None = None
+    for n, x0, y0, inside in options:
+        if n < top - 3:
+            continue
+        Hw, _ = cv2.findHomography(nodes[inside], img_pts[inside], 0)
+        if Hw is None:
+            continue
+        grid = np.array([[x0, y0], [x0 + 8, y0], [x0 + 8, y0 + 8], [x0, y0 + 8]], np.float32)
+        corners = cv2.perspectiveTransform(grid[None], Hw)[0]
+        if not _quad_ok(order_corners(corners), 0.0):
+            continue
+        key = n + ring_score(gray, Hw, x0, y0) / 10.0  # 10 grey levels ~ one node
+        if best is None or key > best[0]:
+            best = (key, 0.0, corners)
+    return None if best is None else (best[0], best[2])
+
+
+def fit_grid(gray: np.ndarray, pts: np.ndarray, rng: np.random.Generator, iterations: int = 1000, keep: int = 4) -> np.ndarray | None:
+    """RANSAC: a hypothesis is one square (four neighbouring X points) grown into
+    the whole lattice. The few best hypotheses (by point count) are finally
+    compared by the checkerboard pattern, which is the real judge, because small
+    "lattices" through piece details can also collect many points."""
+    if len(pts) < 9:
+        return None
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(pts)
+    _, nn = tree.query(pts, k=min(13, len(pts)))
+    min_cell = max(gray.shape) / 40  # the board is not smaller than ~1/5 of the image
+    unit = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], np.float32)
+    hyps: list[tuple[int, np.ndarray]] = []
+    for _ in range(iterations):
+        i = int(rng.integers(len(pts)))
+        p = pts[i]
+        a_idx, b_idx = rng.choice(nn[i][1:], 2, replace=False)
+        a, b = pts[a_idx], pts[b_idx]
+        va, vb = a - p, b - p
+        la, lb = np.linalg.norm(va), np.linalg.norm(vb)
+        if min(la, lb) < min_cell or max(la, lb) > 2.5 * min(la, lb):
+            continue
+        if abs(float(va @ vb) / (la * lb)) > 0.6:  # square sides are at least ~50° apart
+            continue
+        dist, d_idx = tree.query(a + b - p)
+        if dist > 0.2 * min(la, lb):
+            continue
+        H = _grow_lattice(cv2.getPerspectiveTransform(unit, np.array([p, a, pts[d_idx], b], np.float32)), pts)
+        if H is None or _cell_size(H, pts) < min_cell:
+            continue
+        H = _reduce_basis(H, pts)
+        hyps.append((len(_node_matches(H, pts, 0.12)[0]), H))  # each node counts once
+
+    hyps.sort(key=lambda t: -t[0])
+    distinct: list[np.ndarray] = []
+    for _, H in hyps:
+        probe = cv2.perspectiveTransform(np.array([[[0, 0], [4, 4]]], np.float32), H)[0]
+        if all(np.abs(probe - cv2.perspectiveTransform(np.array([[[0, 0], [4, 4]]], np.float32), D)[0]).max() > 3 for D in distinct):
+            distinct.append(H)
+        if len(distinct) >= keep:
+            break
+
+    best: tuple[float, np.ndarray] | None = None
+    for H in distinct:
+        placed = _place_window(gray, H, pts)
+        if placed and (best is None or placed[0] > best[0]):
+            best = placed
+    return None if best is None else best[1]
+
+
+def detect_board(image: np.ndarray, seed: int = 0) -> BoardDetection | None:
     """Main entry point: BGR image -> corners of the playing area, or None."""
     gray_full = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     scale = WORK_SIZE / max(gray_full.shape)
@@ -210,7 +442,13 @@ def detect_board(image: np.ndarray) -> BoardDetection | None:
     gray = cv2.resize(gray_full, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else gray_full
     gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
 
-    # Quadrilateral contours + a grid search inside each.
+    rng = np.random.default_rng(seed)  # deterministic result for the same image
+    grid = fit_grid(gray, saddle_points(gray), rng)
+    if grid is not None:
+        corners = order_corners(grid)
+        return BoardDetection(corners=corners / scale, score=grid_score(gray, corners))
+
+    # Fallback: quadrilateral contours + a grid search inside each.
     scored: list[tuple[float, np.ndarray]] = []
     for quad in candidate_quads(gray):
         corners = order_corners(find_lattice(gray, quad)[0])
