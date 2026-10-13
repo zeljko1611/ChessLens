@@ -1,0 +1,11 @@
+{
+  "images": 98,
+  "model": "baseline:square_baseline.joblib",
+  "detection_%": 100.0,
+  "square_accuracy_%": 99.0,
+  "perfect_boards_%": 78.57,
+  "at_most_one_error_%": 91.84,
+  "orientation_%": 95.92,
+  "perfect_boards_with_known_orientation_%": 82.65,
+  "mean_time_ms": 756.1
+}
