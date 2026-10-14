@@ -27,6 +27,9 @@ import numpy as np
 WORK_SIZE = 1000  # detection runs on a downscaled image (longest side)
 LATTICE_N = 400  # size of the rectified candidate used for the grid search
 REFINE_CELL = 16  # pixels per square during refinement
+RING_WEIGHT = 0.1  # how many nodes one grey level of ring_score is worth
+PLAIN_WEIGHT = 1.0  # weight of the unsigned term in ring_score
+WINDOW_SLACK = 3  # windows with up to this many fewer nodes than the best are compared by ring_score
 
 
 @dataclass
@@ -335,16 +338,27 @@ def ring_score(gray: np.ndarray, H: np.ndarray, x0: int, y0: int, cell: int = 16
     m = 2
     v = np.median(warped.astype(np.float32).reshape(10, cell, 10, cell)[:, m:-m, :, m:-m].transpose(0, 2, 1, 3).reshape(10, 10, -1), axis=2)
 
-    def ring_alternation(k: int) -> float:
-        # Neighbour differences along the ring at distance k from the edge of the 10x10 window.
-        a, b = k, 9 - k
-        diffs = np.concatenate([
-            np.abs(np.diff(v[a, a : b + 1])), np.abs(np.diff(v[b, a : b + 1])),
-            np.abs(np.diff(v[a : b + 1, a])), np.abs(np.diff(v[a : b + 1, b])),
-        ])
-        return float(np.median(diffs))
+    # Expected checkerboard pattern (its sign) estimated from the board interior.
+    # For each square, (v - mid) * pattern is positive when the square has the
+    # colour the pattern predicts. The median along a row is robust to pieces,
+    # and a uniform frame or table gives about 0 because the pattern alternates.
+    parity = np.where(np.add.outer(np.arange(10), np.arange(10)) % 2 == 0, 1.0, -1.0)
+    mid = float(np.median(v[2:8, 2:8]))
+    sign = np.sign(np.mean((v[2:8, 2:8] - mid) * parity[2:8, 2:8])) or 1.0
+    agree = (v - mid) * parity * sign
 
-    return ring_alternation(1) - ring_alternation(0)
+    # Each side separately: the inner row must follow the pattern and the row
+    # just outside must not. A window shifted by one row breaks only one side,
+    # which the median of the whole ring would miss but the per-side sum catches.
+    sides = [
+        (agree[1, 1:9], agree[0, 1:9]), (agree[8, 1:9], agree[9, 1:9]),
+        (agree[1:9, 1], agree[1:9, 0]), (agree[1:9, 8], agree[1:9, 9]),
+    ]
+    signed = sum(np.median(inside) - abs(np.median(outside)) for inside, outside in sides)
+    # Second term: unsigned neighbour contrast (handles boards without a frame).
+    plain = sum(np.median(np.abs(np.diff(v[i]))) - np.median(np.abs(np.diff(v[o])))
+                for i, o in ((np.s_[1, 1:9], np.s_[0, 1:9]), (np.s_[8, 1:9], np.s_[9, 1:9]), (np.s_[1:9, 1], np.s_[1:9, 0]), (np.s_[1:9, 8], np.s_[1:9, 9])))
+    return float(signed + PLAIN_WEIGHT * plain)
 
 
 def _place_window(gray: np.ndarray, H: np.ndarray, pts: np.ndarray) -> tuple[float, np.ndarray] | None:
@@ -368,7 +382,7 @@ def _place_window(gray: np.ndarray, H: np.ndarray, pts: np.ndarray) -> tuple[flo
     top = max(o[0] for o in options)
     best: tuple[float, float, np.ndarray] | None = None
     for n, x0, y0, inside in options:
-        if n < top - 3:
+        if n < top - WINDOW_SLACK:
             continue
         Hw, _ = cv2.findHomography(nodes[inside], img_pts[inside], 0)
         if Hw is None:
@@ -377,7 +391,7 @@ def _place_window(gray: np.ndarray, H: np.ndarray, pts: np.ndarray) -> tuple[flo
         corners = cv2.perspectiveTransform(grid[None], Hw)[0]
         if not _quad_ok(order_corners(corners), 0.0):
             continue
-        key = n + ring_score(gray, Hw, x0, y0) / 10.0  # 10 grey levels ~ one node
+        key = n + RING_WEIGHT * ring_score(gray, Hw, x0, y0)
         if best is None or key > best[0]:
             best = (key, 0.0, corners)
     return None if best is None else (best[0], best[2])
