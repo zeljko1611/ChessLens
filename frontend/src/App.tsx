@@ -202,6 +202,31 @@ export default function App() {
     setSelected(piece && piece.color === game.turn() && sq !== selected ? sq : null);
   };
 
+  // Dragging: in a game only legal moves by the side to move; in edit mode a piece
+  // moves freely, and dropping it off the board removes it.
+  const canDrag = (sq: string): boolean => {
+    if (playing) return chess.current?.get(sq as Square)?.color === chess.current?.turn();
+    const [r, c] = parseSquare(sq);
+    return !!board && board[r][c] !== ".";
+  };
+
+  const onDrop = (from: string, to: string | null) => {
+    setSelected(null);
+    if (playing) {
+      if (to) tryMove(from, to);
+      return;
+    }
+    if (!board || from === to) return;
+    const [fr, fc] = parseSquare(from);
+    const next = board.map((row) => [...row]);
+    if (to) {
+      const [tr2, tc2] = parseSquare(to);
+      next[tr2][tc2] = next[fr][fc];
+    }
+    next[fr][fc] = ".";
+    setBoard(next);
+  };
+
   const targets = useMemo(
     () => (playFen && selected && chess.current ? new Set(chess.current.moves({ square: selected as Square, verbose: true }).map((m) => m.to as string)) : undefined),
     [playFen, selected],
@@ -301,6 +326,9 @@ export default function App() {
                 onSelect={playing ? onPlayClick : (sq) => setSelected(sq === selected ? null : sq)}
                 targets={targets}
                 lastMove={lastMove}
+                canDrag={canDrag}
+                onDragStart={playing ? setSelected : undefined}
+                onDrop={onDrop}
               />
             </div>
 

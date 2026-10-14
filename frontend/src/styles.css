@@ -174,7 +174,9 @@ button, input, select { font: inherit; color: inherit; }
 
 .board-wrap { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; }
 
-.board { display: block; width: 100%; height: auto; border-radius: 3px; box-shadow: 0 0 0 1.5px var(--ink); }
+.board { display: block; width: 100%; height: auto; border-radius: 3px; box-shadow: 0 0 0 1.5px var(--ink); touch-action: none; user-select: none; }
+.board.dragging, .board.dragging .sq { cursor: grabbing; }
+.pc-drag { font-size: 88px; }
 .sq { cursor: pointer; outline: none; }
 .sq-light { fill: var(--maple); }
 .sq-dark { fill: var(--walnut); }

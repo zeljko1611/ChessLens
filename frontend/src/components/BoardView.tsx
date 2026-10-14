@@ -1,3 +1,4 @@
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { GLYPH, isWhite, parseUci, pieceName, squareName, type Board } from "../lib/chess";
 import { tr, useLang } from "../lib/i18n";
 
@@ -10,15 +11,67 @@ interface Props {
   onSelect: (square: string) => void;
   targets?: Set<string>; // squares the selected piece can move to (game mode)
   lastMove?: [string, string] | null;
+  canDrag: (square: string) => boolean;
+  onDragStart?: (square: string) => void;
+  onDrop: (from: string, to: string | null) => void; // to = null: the piece was dropped off the board
 }
+
+type Drag = { from: string; x: number; y: number; moved: boolean };
 
 const S = 100; // unit = one square in SVG coordinates
 
-export function BoardView({ board, flipped, bestMove, uncertain, selected, onSelect, targets, lastMove }: Props) {
+export function BoardView({ board, flipped, bestMove, uncertain, selected, onSelect, targets, lastMove, canDrag, onDragStart, onDrop }: Props) {
   useLang(); // re-render the labels when the language changes
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
   // Screen position of square (r, c), taking a flipped view into account.
   const at = (r: number, c: number) => (flipped ? [7 - c, 7 - r] : [c, r]);
   const move = bestMove ? parseUci(bestMove) : null;
+
+  const toSvg = (e: ReactPointerEvent): [number, number] => {
+    const pt = svgRef.current!.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const p = pt.matrixTransform(svgRef.current!.getScreenCTM()!.inverse());
+    return [p.x, p.y];
+  };
+
+  // The square under a point (in SVG coordinates), or null outside the board.
+  const squareAt = (x: number, y: number): string | null => {
+    const sx = Math.floor(x / S), sy = Math.floor(y / S);
+    if (sx < 0 || sx > 7 || sy < 0 || sy > 7) return null;
+    return flipped ? squareName(7 - sy, 7 - sx) : squareName(sy, sx);
+  };
+
+  // Pressing a square: if the pointer moves, it is a drag;
+  // if it is released on the same square, it is a plain click.
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (e.button !== 0) return;
+    const [x, y] = toSvg(e);
+    const from = squareAt(x, y);
+    if (!from) return;
+    svgRef.current!.setPointerCapture(e.pointerId);
+    setDrag({ from, x, y, moved: false });
+  };
+
+  const onPointerMove = (e: ReactPointerEvent) => {
+    if (!drag || !canDrag(drag.from)) return;
+    const [x, y] = toSvg(e);
+    const moved = drag.moved || squareAt(x, y) !== drag.from;
+    if (moved && !drag.moved) onDragStart?.(drag.from);
+    setDrag({ ...drag, x, y, moved });
+  };
+
+  const onPointerUp = (e: ReactPointerEvent) => {
+    if (!drag) return;
+    const [x, y] = toSvg(e);
+    const to = squareAt(x, y);
+    setDrag(null);
+    if (drag.moved && canDrag(drag.from)) onDrop(drag.from, to);
+    else if (to === drag.from) onSelect(drag.from);
+  };
+
+  const dragging = drag?.moved ? drag : null;
 
   const cells = [];
   for (let r = 0; r < 8; r++) {
@@ -32,7 +85,6 @@ export function BoardView({ board, flipped, bestMove, uncertain, selected, onSel
           key={name}
           className="sq"
           transform={`translate(${x * S} ${y * S})`}
-          onClick={() => onSelect(name)}
           role="button"
           tabIndex={0}
           aria-label={`${name}, ${piece !== "." ? pieceName(piece) : tr("board.empty")}`}
@@ -43,7 +95,7 @@ export function BoardView({ board, flipped, bestMove, uncertain, selected, onSel
           {uncertain.has(name) && <rect x={5} y={5} width={S - 10} height={S - 10} className="sq-uncertain" />}
           {selected === name && <rect x={3} y={3} width={S - 6} height={S - 6} className="sq-selected" />}
           {piece !== "." && (
-            <text x={S / 2} y={S * 0.8} className={isWhite(piece) ? "pc pc-white" : "pc pc-black"}>
+            <text x={S / 2} y={S * 0.8} className={isWhite(piece) ? "pc pc-white" : "pc pc-black"} opacity={dragging?.from === name ? 0.3 : 1}>
               {GLYPH[piece.toLowerCase()]}
             </text>
           )}
@@ -72,9 +124,28 @@ export function BoardView({ board, flipped, bestMove, uncertain, selected, onSel
   }
 
   return (
-    <svg className="board" viewBox={`0 0 ${8 * S} ${8 * S}`} role="grid" aria-label={tr("board.label")}>
+    <svg
+      ref={svgRef}
+      className={dragging ? "board dragging" : "board"}
+      viewBox={`0 0 ${8 * S} ${8 * S}`}
+      role="grid"
+      aria-label={tr("board.label")}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={() => setDrag(null)}
+    >
       {cells}
       {arrow}
+      {dragging && (() => {
+        const [r, c] = [8 - Number(dragging.from[1]), "abcdefgh".indexOf(dragging.from[0])];
+        const piece = board[r][c];
+        return (
+          <text x={dragging.x} y={dragging.y + S * 0.35} className={`pc ${isWhite(piece) ? "pc-white" : "pc-black"} pc-drag`} pointerEvents="none">
+            {GLYPH[piece.toLowerCase()]}
+          </text>
+        );
+      })()}
     </svg>
   );
 }
