@@ -1,0 +1,11 @@
+{
+  "images": 342,
+  "model": "cnn:square_cnn.onnx",
+  "detection_%": 90.94,
+  "square_accuracy_%": 99.49,
+  "perfect_boards_%": 80.99,
+  "at_most_one_error_%": 88.6,
+  "orientation_%": 98.07,
+  "perfect_boards_with_known_orientation_%": 82.75,
+  "mean_time_ms": 608.2
+}

@@ -1,5 +1,6 @@
-"""Square classifier: hand-crafted features (HOG + colour statistics) and an MLP.
+"""Square classifiers: a CNN exported to ONNX, or the HOG + MLP baseline.
 
+The backend does not depend on PyTorch; the CNN runs on onnxruntime.
 predict_proba(crops) returns (N, 13) probabilities in the order of CLASSES.
 """
 
@@ -13,11 +14,41 @@ import numpy as np
 
 from .position import CLASSES
 
+# CNN input normalisation (must match training/train_cnn.py).
+MEAN = np.array([0.5, 0.5, 0.5], np.float32)
+STD = np.array([0.25, 0.25, 0.25], np.float32)
+
 
 class SquareClassifier(Protocol):
     name: str
 
     def predict_proba(self, crops: np.ndarray) -> np.ndarray: ...
+
+
+def softmax(x: np.ndarray) -> np.ndarray:
+    x = x - x.max(axis=1, keepdims=True)
+    e = np.exp(x)
+    return e / e.sum(axis=1, keepdims=True)
+
+
+def to_cnn_input(crops: np.ndarray) -> np.ndarray:
+    """(N, H, W, 3) uint8 BGR -> (N, 3, H, W) float32 RGB, normalised."""
+    x = crops[..., ::-1].astype(np.float32) / 255.0
+    x = (x - MEAN) / STD
+    return np.ascontiguousarray(x.transpose(0, 3, 1, 2))
+
+
+class OnnxClassifier:
+    def __init__(self, path: str | Path):
+        import onnxruntime as ort
+
+        self.name = f"cnn:{Path(path).name}"
+        self.session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+        self.input_name = self.session.get_inputs()[0].name
+
+    def predict_proba(self, crops: np.ndarray) -> np.ndarray:
+        logits = self.session.run(None, {self.input_name: to_cnn_input(crops)})[0]
+        return softmax(logits.astype(np.float32))
 
 
 def hog(gray: np.ndarray, cell: int = 8, bins: int = 9) -> np.ndarray:
@@ -91,7 +122,10 @@ class SklearnClassifier:
 
 
 def load_classifier(model_dir: str | Path) -> SquareClassifier:
-    path = Path(model_dir) / "square_baseline.joblib"
-    if not path.exists():
-        raise FileNotFoundError(f"Model {path} not found (train it with training/train_baseline.py).")
-    return SklearnClassifier(path)
+    """Load the best available model: the CNN (ONNX) first, then the baseline."""
+    model_dir = Path(model_dir)
+    if (model_dir / "square_cnn.onnx").exists():
+        return OnnxClassifier(model_dir / "square_cnn.onnx")
+    if (model_dir / "square_baseline.joblib").exists():
+        return SklearnClassifier(model_dir / "square_baseline.joblib")
+    raise FileNotFoundError(f"No model in {model_dir} (square_cnn.onnx or square_baseline.joblib).")
