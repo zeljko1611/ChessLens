@@ -6,6 +6,8 @@
 #     frontend/dist), start the server in the background and wait for it.
 #  3. The server stops by itself ~5 minutes after the app is closed
 #     (CHESSVISION_IDLE_TIMEOUT), or manually with scripts/stop_app.sh.
+#  The server is also reachable from phones on the same Wi-Fi network; the
+#  address (and the QR code behind the "On phone" button) comes from /api/health.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -42,8 +44,8 @@ if ! running; then
     fi
 
     say "Starting the server…"
-    CHESSVISION_IDLE_TIMEOUT="${CHESSVISION_IDLE_TIMEOUT:-300}" \
-        nohup "$ROOT/.venv/bin/python" -m uvicorn backend.app:app --host 127.0.0.1 --port "$PORT" >"$STATE/server.log" 2>&1 &
+    CHESSVISION_IDLE_TIMEOUT="${CHESSVISION_IDLE_TIMEOUT:-300}" CHESSVISION_PHONE_PORT="$PORT" \
+        nohup "$ROOT/.venv/bin/python" -m uvicorn backend.app:app --host 0.0.0.0 --port "$PORT" >"$STATE/server.log" 2>&1 &
     echo $! >"$STATE/server.pid"
     for _ in $(seq 1 120); do
         running && break
@@ -54,6 +56,8 @@ if ! running; then
         sleep 0.5
     done
     running || { say "The server is not responding. Details: $STATE/server.log"; exit 1; }
+    PHONE_URL="$(curl -fs --max-time 2 "$URL/api/health" | sed -n 's/.*"phone_url":"\([^"]*\)".*/\1/p')"
+    [ -n "$PHONE_URL" ] && say "Running. On your phone (same Wi-Fi): $PHONE_URL"
 fi
 
 xdg-open "$URL" >/dev/null 2>&1 &

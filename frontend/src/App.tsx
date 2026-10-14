@@ -1,6 +1,7 @@
 import { Chess, type Square } from "chess.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardView } from "./components/BoardView";
+import { PhoneLink } from "./components/PhoneLink";
 import { PhotoView } from "./components/PhotoView";
 import { health, prepareImage, recognize, saveFeedback, type Recognition } from "./lib/api";
 import {
@@ -52,6 +53,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<{ state: "idle" | "saving" | "saved" | "error"; text?: string }>({ state: "idle" });
   const analysisId = useRef(0);
+  const [phoneUrl, setPhoneUrl] = useState<string | null>(null);
 
   // Playing from the recognized position. playFen === null means edit mode;
   // the edited board (board/side/castling) does not change during a game.
@@ -61,6 +63,7 @@ export default function App() {
   const playing = playFen !== null;
 
   useEffect(() => {
+    health().then((h) => setPhoneUrl(h.phone_url)).catch(() => undefined);
     // While the app is open, ping the server every minute. A server started by
     // the launcher (scripts/start_app.sh) stops once the pings stop.
     const beat = setInterval(() => health().catch(() => undefined), 60_000);
@@ -247,7 +250,10 @@ export default function App() {
   if (!photo) {
     return (
       <main className="landing">
-        <LangSwitch lang={lang} />
+        <div className="landing-top">
+          {phoneUrl && <PhoneLink url={phoneUrl} />}
+          <LangSwitch lang={lang} />
+        </div>
         <Intro />
         <Upload onFile={onFile} large />
         {error && <p className="error" role="alert">{error}</p>}
@@ -261,6 +267,7 @@ export default function App() {
         <h1 className="wordmark">{tr("title")}</h1>
         <div className="bar-actions">
           <Upload onFile={onFile} />
+          {phoneUrl && <PhoneLink url={phoneUrl} />}
           <LangSwitch lang={lang} />
         </div>
       </header>

@@ -12,12 +12,15 @@ If frontend/dist exists (after `npm run build`), the server serves it as well.
 Environment variables set by scripts/start_app.sh:
   CHESSVISION_IDLE_TIMEOUT  seconds without requests after which the server stops
                             (an open app calls /api/health every minute)
+  CHESSVISION_PHONE_PORT    the server is reachable on the home network; /api/health
+                            then returns the address for phones (phone_url)
 """
 
 from __future__ import annotations
 
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -36,6 +39,7 @@ from backend.service import BadRequest, Service  # noqa: E402
 
 MAX_UPLOAD = 15 * 1024 * 1024
 IDLE_TIMEOUT = float(os.environ.get("CHESSVISION_IDLE_TIMEOUT", "0"))
+PHONE_PORT = os.environ.get("CHESSVISION_PHONE_PORT")
 service: Service | None = None
 last_request = time.monotonic()
 
@@ -46,6 +50,17 @@ def _shutdown_when_idle() -> None:
         if time.monotonic() - last_request > IDLE_TIMEOUT:
             os.kill(os.getpid(), signal.SIGINT)  # same as Ctrl+C
             return
+
+
+def lan_ip() -> str | None:
+    """This computer's address on the home network (a UDP "connect" sends no packets)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            ip = s.getsockname()[0]
+    except OSError:
+        return None
+    return None if ip.startswith("127.") else ip
 
 
 @asynccontextmanager
@@ -82,7 +97,8 @@ async def read_image(image: UploadFile) -> bytes:
 @app.get("/api/health")
 def health() -> dict:
     assert service is not None
-    return {"status": "ok", "model": service.classifier.name}
+    ip = lan_ip() if PHONE_PORT else None
+    return {"status": "ok", "model": service.classifier.name, "phone_url": f"http://{ip}:{PHONE_PORT}" if ip else None}
 
 
 @app.post("/api/recognize")

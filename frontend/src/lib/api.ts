@@ -25,6 +25,7 @@ export interface Recognition {
 export interface Health {
   status: string;
   model: string;
+  phone_url: string | null; // only when the server runs on the home network
 }
 
 async function asJson<T>(res: Response): Promise<T> {

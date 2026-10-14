@@ -281,7 +281,7 @@ button, input, select { font: inherit; color: inherit; }
 /* Language switch (SR | EN) */
 .bar-actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
 .lang-switch button { padding: 0.35rem 0.6rem; font-size: 0.85rem; letter-spacing: 0.04em; }
-.landing > .lang-switch { display: flex; width: fit-content; margin: 0 0 0.5rem auto; }
+.landing-top { display: flex; justify-content: flex-end; gap: 0.75rem; margin-bottom: 0.5rem; }
 
 /* Game mode */
 .sq-last { fill: var(--move); opacity: 0.25; }
@@ -292,3 +292,10 @@ button, input, select { font: inherit; color: inherit; }
 .play-moves { font-variant-numeric: tabular-nums; color: var(--ink-soft); word-spacing: 0.15em; }
 .play p { margin: 0; }
 .play .controls { justify-content: flex-start; }
+
+/* QR code for opening the app on a phone */
+.phone { position: relative; }
+.phone-panel { position: absolute; right: 0; top: calc(100% + 0.5rem); z-index: 10; width: 15rem; padding: 1rem; background: var(--surface); border: 1.5px solid var(--ink); border-radius: var(--radius); box-shadow: 0 8px 24px rgb(0 0 0 / 0.15); }
+.phone-qr { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+.phone-url { margin: 0.6rem 0 0.3rem; font-family: var(--mono); font-size: 0.85rem; word-break: break-all; }
+.phone-panel .hint { margin: 0; font-size: 0.8rem; }
