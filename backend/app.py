@@ -8,11 +8,19 @@
 
 Errors are returned as a code in the "detail" field (e.g. "board_not_found").
 If frontend/dist exists (after `npm run build`), the server serves it as well.
+
+Environment variables set by scripts/start_app.sh:
+  CHESSVISION_IDLE_TIMEOUT  seconds without requests after which the server stops
+                            (an open app calls /api/health every minute)
 """
 
 from __future__ import annotations
 
+import os
+import signal
 import sys
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -27,13 +35,25 @@ sys.path.insert(0, str(ROOT))
 from backend.service import BadRequest, Service  # noqa: E402
 
 MAX_UPLOAD = 15 * 1024 * 1024
+IDLE_TIMEOUT = float(os.environ.get("CHESSVISION_IDLE_TIMEOUT", "0"))
 service: Service | None = None
+last_request = time.monotonic()
+
+
+def _shutdown_when_idle() -> None:
+    while True:
+        time.sleep(5)
+        if time.monotonic() - last_request > IDLE_TIMEOUT:
+            os.kill(os.getpid(), signal.SIGINT)  # same as Ctrl+C
+            return
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global service
     service = Service()
+    if IDLE_TIMEOUT > 0:
+        threading.Thread(target=_shutdown_when_idle, daemon=True).start()
     yield
 
 
@@ -41,6 +61,15 @@ app = FastAPI(title="Chess Vision", lifespan=lifespan)
 app.add_middleware(  # for `npm run dev` (Vite on port 5173)
     CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["*"], allow_headers=["*"]
 )
+
+
+@app.middleware("http")
+async def track_activity(request, call_next):
+    global last_request
+    last_request = time.monotonic()
+    response = await call_next(request)
+    last_request = time.monotonic()
+    return response
 
 
 async def read_image(image: UploadFile) -> bytes:

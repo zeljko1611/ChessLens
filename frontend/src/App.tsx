@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardView } from "./components/BoardView";
 import { PhotoView } from "./components/PhotoView";
-import { prepareImage, recognize, saveFeedback, type Recognition } from "./lib/api";
+import { health, prepareImage, recognize, saveFeedback, type Recognition } from "./lib/api";
 import {
   GLYPH,
   PIECES,
@@ -51,6 +51,13 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<{ state: "idle" | "saving" | "saved" | "error"; text?: string }>({ state: "idle" });
   const analysisId = useRef(0);
+
+  useEffect(() => {
+    // While the app is open, ping the server every minute. A server started by
+    // the launcher (scripts/start_app.sh) stops once the pings stop.
+    const beat = setInterval(() => health().catch(() => undefined), 60_000);
+    return () => clearInterval(beat);
+  }, []);
 
   const applyResult = useCallback((res: Recognition) => {
     setResult(res);
