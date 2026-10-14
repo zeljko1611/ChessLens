@@ -3,7 +3,9 @@
     uvicorn backend.app:app --reload --port 8000
 
     GET  /api/health      which model is loaded
-    POST /api/recognize   multipart: image (+ optional corners, orientation, side_to_move)
+    POST /api/recognize   multipart: image (+ optional corners, orientation, side_to_move, client)
+    GET  /api/latest      the latest recognition (?since=id), so a photo taken on a phone
+                          shows up on the computer right away; the image is at /api/latest/image
     POST /api/feedback    multipart: image, corners (a8, h8, h1, a1), placement
 
 Errors are returned as a code in the "detail" field (e.g. "board_not_found").
@@ -11,7 +13,7 @@ If frontend/dist exists (after `npm run build`), the server serves it as well.
 
 Environment variables set by scripts/start_app.sh:
   CHESSVISION_IDLE_TIMEOUT  seconds without requests after which the server stops
-                            (an open app calls /api/health every minute)
+                            (an open app polls /api/latest every 2 seconds)
   CHESSVISION_PHONE_PORT    the server is reachable on the home network; /api/health
                             then returns the address for phones (phone_url)
 """
@@ -27,7 +29,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -42,6 +44,9 @@ IDLE_TIMEOUT = float(os.environ.get("CHESSVISION_IDLE_TIMEOUT", "0"))
 PHONE_PORT = os.environ.get("CHESSVISION_PHONE_PORT")
 service: Service | None = None
 last_request = time.monotonic()
+# The latest recognition from any device: {"id", "client", "result"} and the uploaded image.
+latest: dict = {"id": 0}
+latest_image = b""
 
 
 def _shutdown_when_idle() -> None:
@@ -107,14 +112,31 @@ async def recognize_endpoint(
     corners: str | None = Form(None),
     orientation: int | None = Form(None),
     side_to_move: str | None = Form(None),
+    client: str | None = Form(None),  # sender id, so the sender does not reload its own photo
 ) -> dict:
+    global latest, latest_image
     assert service is not None
     data = await read_image(image)
     try:
         # Computer vision is CPU-bound work: run it outside the event loop.
-        return await run_in_threadpool(service.recognize, data, corners, orientation, side_to_move)
+        res = await run_in_threadpool(service.recognize, data, corners, orientation, side_to_move)
     except BadRequest as e:
         raise HTTPException(422, str(e)) from e
+    latest, latest_image = {"id": latest["id"] + 1, "client": client, "result": res}, data
+    return res
+
+
+@app.get("/api/latest")
+def latest_endpoint(since: int = 0) -> dict:
+    # No result unless there is something new; clients poll this every 2 seconds.
+    return latest if latest["id"] > since else {"id": latest["id"]}
+
+
+@app.get("/api/latest/image")
+def latest_image_endpoint() -> Response:
+    if not latest_image:
+        raise HTTPException(404, "no_image")
+    return Response(latest_image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/feedback")

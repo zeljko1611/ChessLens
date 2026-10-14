@@ -80,6 +80,12 @@ def test_http_api():
         bad = client.post("/api/recognize", files={"image": ("x.jpg", b"nope", "image/jpeg")})
         assert bad.json()["detail"] == "not_an_image"  # an error code; the frontend makes the text
 
+        # The latest recognition is available to other devices (phone -> computer).
+        latest = client.get("/api/latest").json()
+        assert latest["result"]["fen"] == r.json()["fen"]
+        assert client.get(f"/api/latest?since={latest['id']}").json() == {"id": latest["id"]}
+        assert client.get("/api/latest/image").content == data
+
 
 def test_save_feedback(tmp_path):
     if not HAS_MODEL:

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardView } from "./components/BoardView";
 import { PhoneLink } from "./components/PhoneLink";
 import { PhotoView } from "./components/PhotoView";
-import { health, prepareImage, recognize, saveFeedback, type Recognition } from "./lib/api";
+import { CLIENT_ID, health, latest, latestImage, prepareImage, recognize, saveFeedback, type Recognition } from "./lib/api";
 import {
   GLYPH,
   PIECES,
@@ -64,10 +64,6 @@ export default function App() {
 
   useEffect(() => {
     health().then((h) => setPhoneUrl(h.phone_url)).catch(() => undefined);
-    // While the app is open, ping the server every minute. A server started by
-    // the launcher (scripts/start_app.sh) stops once the pings stop.
-    const beat = setInterval(() => health().catch(() => undefined), 60_000);
-    return () => clearInterval(beat);
   }, []);
 
   const applyResult = useCallback((res: Recognition) => {
@@ -99,6 +95,36 @@ export default function App() {
     },
     [applyResult],
   );
+
+  // Every 2 seconds: has another device (e.g. a phone) just recognized something?
+  // If so, show the same photo and position here too. This also keeps alive the
+  // server started by the launcher (it stops once everything is closed).
+  const seen = useRef<number | null>(null); // null = unknown yet; older results are not loaded
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const l = await latest(seen.current ?? Number.MAX_SAFE_INTEGER);
+        if (seen.current === null || l.id <= seen.current) {
+          seen.current = l.id;
+          return;
+        }
+        seen.current = l.id;
+        if (!l.result || l.client === CLIENT_ID) return;
+        const p = await prepareImage(await latestImage());
+        setPhoto((old) => {
+          if (old) URL.revokeObjectURL(old.url);
+          return p;
+        });
+        setError(null);
+        applyResult(l.result);
+      } catch {
+        /* the server is unavailable right now; try again later */
+      }
+    };
+    check();
+    const timer = setInterval(check, 2000);
+    return () => clearInterval(timer);
+  }, [applyResult]);
 
   const onFile = async (file: File | undefined) => {
     if (!file) return;

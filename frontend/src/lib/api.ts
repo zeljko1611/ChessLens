@@ -50,12 +50,17 @@ export async function health(): Promise<Health> {
   return asJson(await fetch("/api/health"));
 }
 
+// Id of this tab: the server returns it with the latest recognition so a tab does not
+// reload its own photo. (crypto.randomUUID is unavailable over plain http on phones.)
+export const CLIENT_ID = Math.random().toString(36).slice(2);
+
 export async function recognize(
   image: Blob,
   opts: { corners?: [number, number][]; orientation?: number } = {},
 ): Promise<Recognition> {
   const form = new FormData();
   form.append("image", image, "board.jpg");
+  form.append("client", CLIENT_ID);
   if (opts.corners) form.append("corners", JSON.stringify(opts.corners));
   if (opts.orientation !== undefined) form.append("orientation", String(opts.orientation));
   return asJson(await fetch("/api/recognize", { method: "POST", body: form }));
@@ -68,6 +73,23 @@ export async function saveFeedback(image: Blob, corners: [number, number][], pla
   form.append("corners", JSON.stringify(corners));
   form.append("placement", placement);
   return asJson(await fetch("/api/feedback", { method: "POST", body: form }));
+}
+
+export interface Latest {
+  id: number;
+  client?: string | null;
+  result?: Recognition; // only if there is something newer than `since`
+}
+
+/** The latest recognition from any device (e.g. a photo taken on a phone). */
+export async function latest(since: number): Promise<Latest> {
+  return asJson(await fetch(`/api/latest?since=${since}`));
+}
+
+export async function latestImage(): Promise<Blob> {
+  const res = await fetch("/api/latest/image", { cache: "no-store" });
+  if (!res.ok) throw new Error(tr("api.serverError", { status: res.status }));
+  return res.blob();
 }
 
 /**
