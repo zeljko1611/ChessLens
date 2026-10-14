@@ -1,3 +1,4 @@
+import { Chess, type Square } from "chess.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardView } from "./components/BoardView";
 import { PhotoView } from "./components/PhotoView";
@@ -52,6 +53,13 @@ export default function App() {
   const [feedback, setFeedback] = useState<{ state: "idle" | "saving" | "saved" | "error"; text?: string }>({ state: "idle" });
   const analysisId = useRef(0);
 
+  // Playing from the recognized position. playFen === null means edit mode;
+  // the edited board (board/side/castling) does not change during a game.
+  const chess = useRef<Chess | null>(null);
+  const [playFen, setPlayFen] = useState<string | null>(null);
+  const [lastMove, setLastMove] = useState<[string, string] | null>(null);
+  const playing = playFen !== null;
+
   useEffect(() => {
     // While the app is open, ping the server every minute. A server started by
     // the launcher (scripts/start_app.sh) stops once the pings stop.
@@ -71,6 +79,7 @@ export default function App() {
     setFlipped(false);
     setFenDraft(null);
     setFeedback({ state: "idle" });
+    setPlayFen(null);
   }, []);
 
   const run = useCallback(
@@ -105,9 +114,12 @@ export default function App() {
     }
   };
 
-  const fen = board ? toFen(board, side, castling) : null;
+  const editFen = board ? toFen(board, side, castling) : null;
+  const fen = playFen ?? editFen;
+  const shownBoard = playFen ? placementToBoard(playFen) : board;
+  const shownSide: Side = playFen ? (playFen.split(" ")[1] as Side) : side;
   // Error messages are in the current language, so recompute them when it changes.
-  const errors = useMemo(() => (board ? validate(board, side) : []), [board, side, lang]);
+  const errors = useMemo(() => (board && !playing ? validate(board, side) : []), [board, side, lang, playing]);
   const allowed = board ? possibleCastling(board) : null;
   const uncertain = useMemo(() => new Set(result?.uncertain ?? []), [result]);
 
@@ -151,17 +163,61 @@ export default function App() {
     }
   };
 
+  // A game starts (or restarts) from the photo position, including corrections.
+  const startGame = () => {
+    if (!editFen) return;
+    try {
+      chess.current = new Chess(editFen);
+    } catch (e) {
+      setError((e as Error).message); // chess.js is stricter than our check (e.g. impossible castling)
+      return;
+    }
+    setPlayFen(chess.current.fen());
+    setLastMove(null);
+    setSelected(null);
+  };
+
+  const stopGame = () => {
+    chess.current = null;
+    setPlayFen(null);
+    setLastMove(null);
+    setSelected(null);
+  };
+
+  // The first click selects a piece of the side to move, the second plays it.
+  const tryMove = (from: string, to: string): boolean => {
+    const game = chess.current;
+    if (!game || !game.moves({ square: from as Square, verbose: true }).some((m) => m.to === to)) return false;
+    game.move({ from, to, promotion: "q" }); // always promote to a queen
+    setPlayFen(game.fen());
+    setLastMove([from, to]);
+    setSelected(null);
+    return true;
+  };
+
+  const onPlayClick = (sq: string) => {
+    const game = chess.current;
+    if (!game || (selected && tryMove(selected, sq))) return;
+    const piece = game.get(sq as Square);
+    setSelected(piece && piece.color === game.turn() && sq !== selected ? sq : null);
+  };
+
+  const targets = useMemo(
+    () => (playFen && selected && chess.current ? new Set(chess.current.moves({ square: selected as Square, verbose: true }).map((m) => m.to as string)) : undefined),
+    [playFen, selected],
+  );
+
   const pv = useMemo(() => {
-    if (!board || !analysis?.pv?.length) return [];
-    let b = board;
+    if (!shownBoard || !analysis?.pv?.length) return [];
+    let b = shownBoard;
     return analysis.pv.slice(0, 8).map((m) => {
       const text = describeMove(b, m);
       b = applyUci(b, m);
       return text;
     });
-  }, [board, analysis]);
+  }, [shownBoard, analysis]);
 
-  const evalView = analysis && (analysis.score_cp !== null || analysis.mate !== null) ? whitePerspective(analysis, side) : null;
+  const evalView = analysis && (analysis.score_cp !== null || analysis.mate !== null) ? whitePerspective(analysis, shownSide) : null;
 
   if (!photo) {
     return (
@@ -192,7 +248,7 @@ export default function App() {
           height={photo.height}
           result={result}
           corners={corners}
-          selected={selected}
+          selected={playing ? null : selected}
           onCornersChange={(c) => {
             setCorners(c);
             setCornersMoved(true);
@@ -232,21 +288,25 @@ export default function App() {
       </section>
 
       <section className="pane pane-board" aria-label={tr("pane.board")} aria-busy={busy}>
-        {board ? (
+        {board && shownBoard ? (
           <>
             <div className="board-wrap">
               <EvalBar share={evalView?.whiteShare ?? 0.5} flipped={flipped} />
               <BoardView
-                board={board}
+                board={shownBoard}
                 flipped={flipped}
                 bestMove={errors.length ? null : analysis?.best_move ?? null}
-                uncertain={uncertain}
+                uncertain={playing ? new Set() : uncertain}
                 selected={selected}
-                onSelect={(sq) => setSelected(sq === selected ? null : sq)}
+                onSelect={playing ? onPlayClick : (sq) => setSelected(sq === selected ? null : sq)}
+                targets={targets}
+                lastMove={lastMove}
               />
             </div>
 
-            {selected ? (
+            {playing && chess.current ? (
+              <PlayPanel game={chess.current} onReset={startGame} onEdit={stopGame} />
+            ) : selected ? (
               <div className="picker" role="toolbar" aria-label={tr("picker.label", { square: selected })}>
                 <span className="picker-title">{selected}</span>
                 {PIECES.map((p) => (
@@ -270,12 +330,15 @@ export default function App() {
               </p>
             )}
 
+            {!playing && (
+            <>
             <div className="controls">
               <div className="segmented" role="radiogroup" aria-label={tr("side.label")}>
                 <button role="radio" aria-checked={side === "w"} className={side === "w" ? "on" : ""} onClick={() => setSide("w")}>{tr("side.white")}</button>
                 <button role="radio" aria-checked={side === "b"} className={side === "b" ? "on" : ""} onClick={() => setSide("b")}>{tr("side.black")}</button>
               </div>
               <button className="btn" onClick={() => setFlipped(!flipped)}>{tr("flip")}</button>
+              <button className="btn primary" disabled={errors.length > 0} onClick={startGame}>{tr("play.start")}</button>
             </div>
 
             {allowed && (allowed.K || allowed.Q || allowed.k || allowed.q) && (
@@ -296,6 +359,8 @@ export default function App() {
               <ul className="problems" role="alert">
                 {errors.map((e) => <li key={e}>{e}</li>)}
               </ul>
+            )}
+            </>
             )}
 
             {!errors.length && (
@@ -325,6 +390,7 @@ export default function App() {
               <input
                 id="fen"
                 spellCheck={false}
+                readOnly={playing}
                 value={fenDraft ?? fen ?? ""}
                 onChange={(e) => setFenDraft(e.target.value)}
                 onBlur={() => {
@@ -344,7 +410,7 @@ export default function App() {
               {fen && <a className="btn" href={lichessUrl(fen)} target="_blank" rel="noreferrer">{tr("lichess")}</a>}
             </div>
 
-            {result && (
+            {result && !playing && (
               <div className="teach">
                 <button
                   className="btn"
@@ -364,6 +430,34 @@ export default function App() {
           <div className="board-placeholder">{busy ? tr("placeholder.busy") : tr("placeholder.idle")}</div>
         )}
       </section>
+    </div>
+  );
+}
+
+/** Game status, the moves played and the game buttons. */
+function PlayPanel({ game, onReset, onEdit }: { game: Chess; onReset: () => void; onEdit: () => void }) {
+  const turn = game.turn() === "w" ? tr("side.white") : tr("side.black");
+  const status = game.isCheckmate()
+    ? tr("play.mate", { winner: game.turn() === "w" ? tr("play.black") : tr("play.white") })
+    : game.isStalemate()
+      ? tr("play.stalemate")
+      : game.isDraw()
+        ? tr("play.draw")
+        : game.inCheck()
+          ? `${tr("play.check")} ${turn}`
+          : turn;
+  const moves = game.history();
+  const start = game.history({ verbose: true })[0]?.before.split(" ")[1] === "b" ? 1 : 0; // when Black moves first
+  const numbered = moves.map((m, i) => ((i + start) % 2 === 0 ? `${Math.floor((i + start) / 2) + 1}. ${m}` : i === 0 ? `1… ${m}` : m));
+  return (
+    <div className="play">
+      <p className="play-status" aria-live="polite">{status}</p>
+      <p className="hint">{tr("play.hint")}</p>
+      {moves.length > 0 && <p className="play-moves">{numbered.join(" ")}</p>}
+      <div className="controls">
+        <button className="btn" onClick={onReset}>{tr("play.reset")}</button>
+        <button className="btn" onClick={onEdit}>{tr("play.edit")}</button>
+      </div>
     </div>
   );
 }

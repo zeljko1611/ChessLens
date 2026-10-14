@@ -8,11 +8,13 @@ interface Props {
   uncertain: Set<string>;
   selected: string | null;
   onSelect: (square: string) => void;
+  targets?: Set<string>; // squares the selected piece can move to (game mode)
+  lastMove?: [string, string] | null;
 }
 
 const S = 100; // unit = one square in SVG coordinates
 
-export function BoardView({ board, flipped, bestMove, uncertain, selected, onSelect }: Props) {
+export function BoardView({ board, flipped, bestMove, uncertain, selected, onSelect, targets, lastMove }: Props) {
   useLang(); // re-render the labels when the language changes
   // Screen position of square (r, c), taking a flipped view into account.
   const at = (r: number, c: number) => (flipped ? [7 - c, 7 - r] : [c, r]);
@@ -37,6 +39,7 @@ export function BoardView({ board, flipped, bestMove, uncertain, selected, onSel
           onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onSelect(name))}
         >
           <rect width={S} height={S} className={light ? "sq-light" : "sq-dark"} />
+          {lastMove?.includes(name) && <rect width={S} height={S} className="sq-last" />}
           {uncertain.has(name) && <rect x={5} y={5} width={S - 10} height={S - 10} className="sq-uncertain" />}
           {selected === name && <rect x={3} y={3} width={S - 6} height={S - 6} className="sq-selected" />}
           {piece !== "." && (
@@ -44,6 +47,7 @@ export function BoardView({ board, flipped, bestMove, uncertain, selected, onSel
               {GLYPH[piece.toLowerCase()]}
             </text>
           )}
+          {targets?.has(name) && <circle cx={S / 2} cy={S / 2} r={piece !== "." ? S * 0.45 : S * 0.15} className={piece !== "." ? "sq-capture" : "sq-target"} />}
           {y === 7 && <text x={S - 8} y={S - 8} className={`coord ${light ? "on-light" : "on-dark"}`} textAnchor="end">{"abcdefgh"[c]}</text>}
           {x === 0 && <text x={7} y={22} className={`coord ${light ? "on-light" : "on-dark"}`}>{8 - r}</text>}
         </g>,
