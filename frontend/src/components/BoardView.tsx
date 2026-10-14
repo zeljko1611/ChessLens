@@ -1,6 +1,7 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { GLYPH, isWhite, parseUci, pieceName, squareName, type Board } from "../lib/chess";
+import { parseUci, pieceName, squareName, type Board } from "../lib/chess";
 import { tr, useLang } from "../lib/i18n";
+import { Piece } from "./Piece";
 
 interface Props {
   board: Board;
@@ -94,11 +95,7 @@ export function BoardView({ board, flipped, bestMove, uncertain, selected, onSel
           {lastMove?.includes(name) && <rect width={S} height={S} className="sq-last" />}
           {uncertain.has(name) && <rect x={5} y={5} width={S - 10} height={S - 10} className="sq-uncertain" />}
           {selected === name && <rect x={3} y={3} width={S - 6} height={S - 6} className="sq-selected" />}
-          {piece !== "." && (
-            <text x={S / 2} y={S * 0.8} className={isWhite(piece) ? "pc pc-white" : "pc pc-black"} opacity={dragging?.from === name ? 0.3 : 1}>
-              {GLYPH[piece.toLowerCase()]}
-            </text>
-          )}
+          {piece !== "." && <Piece piece={piece} opacity={dragging?.from === name ? 0.3 : 1} />}
           {targets?.has(name) && <circle cx={S / 2} cy={S / 2} r={piece !== "." ? S * 0.45 : S * 0.15} className={piece !== "." ? "sq-capture" : "sq-target"} />}
           {y === 7 && <text x={S - 8} y={S - 8} className={`coord ${light ? "on-light" : "on-dark"}`} textAnchor="end">{"abcdefgh"[c]}</text>}
           {x === 0 && <text x={7} y={22} className={`coord ${light ? "on-light" : "on-dark"}`}>{8 - r}</text>}
@@ -140,11 +137,8 @@ export function BoardView({ board, flipped, bestMove, uncertain, selected, onSel
       {dragging && (() => {
         const [r, c] = [8 - Number(dragging.from[1]), "abcdefgh".indexOf(dragging.from[0])];
         const piece = board[r][c];
-        return (
-          <text x={dragging.x} y={dragging.y + S * 0.35} className={`pc ${isWhite(piece) ? "pc-white" : "pc-black"} pc-drag`} pointerEvents="none">
-            {GLYPH[piece.toLowerCase()]}
-          </text>
-        );
+        const size = S * 1.15; // slightly larger while dragged, centred on the pointer
+        return piece === "." ? null : <Piece piece={piece} x={dragging.x - size / 2} y={dragging.y - size / 2} size={size} />;
       })()}
     </svg>
   );

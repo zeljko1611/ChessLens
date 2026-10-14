@@ -1,3 +1,11 @@
+/* Chess glyphs from Noto Sans Symbols 2 (SIL OFL 1.1), only ♚♛♜♝♞♟, used in the
+   move list. Without it phones render them as fixed-colour emoji. */
+@font-face {
+  font-family: "ChessPieces";
+  src: url("./assets/chess-pieces.ttf") format("truetype");
+  unicode-range: U+265A-265F;
+}
+
 /*
   ChessLens visual system
   Colours come from over-the-board chess: a wooden board (maple and walnut), the
@@ -19,7 +27,7 @@
   --piece-white: #fbf8f1;
   --piece-black: #2a2420;
 
-  --font: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font: "ChessPieces", "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --radius: 6px;
   color-scheme: light;
@@ -176,7 +184,6 @@ button, input, select { font: inherit; color: inherit; }
 
 .board { display: block; width: 100%; height: auto; border-radius: 3px; box-shadow: 0 0 0 1.5px var(--ink); touch-action: none; user-select: none; }
 .board.dragging, .board.dragging .sq { cursor: grabbing; }
-.pc-drag { font-size: 88px; }
 .sq { cursor: pointer; outline: none; }
 .sq-light { fill: var(--maple); }
 .sq-dark { fill: var(--walnut); }
@@ -184,7 +191,7 @@ button, input, select { font: inherit; color: inherit; }
 .sq-uncertain { fill: none; stroke: var(--warn); stroke-width: 6px; stroke-dasharray: 14 8; }
 .sq-selected { fill: none; stroke: var(--ink); stroke-width: 6px; }
 
-.pc { font-size: 78px; text-anchor: middle; paint-order: stroke; stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; font-family: "DejaVu Sans", "Segoe UI Symbol", "Apple Symbols", sans-serif; }
+.pc { paint-order: stroke; stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; }
 .pc-white { fill: var(--piece-white); stroke: #3a2f26; }
 .pc-black { fill: var(--piece-black); stroke: #f3ead8; stroke-width: 1.5px; }
 
@@ -218,13 +225,10 @@ button, input, select { font: inherit; color: inherit; }
   border: 1.5px solid var(--rule);
   border-radius: var(--radius);
   background: var(--maple);
-  font-size: 1.7rem;
-  line-height: 1;
+  padding: 2px;
   cursor: pointer;
-  font-family: "DejaVu Sans", "Segoe UI Symbol", "Apple Symbols", sans-serif;
 }
-.pick.pc-white { color: var(--piece-white); -webkit-text-stroke: 1px #3a2f26; }
-.pick.pc-black { color: var(--piece-black); }
+.pick svg { display: block; width: 100%; height: 100%; }
 .pick:hover { border-color: var(--ink); }
 .pick-empty { color: var(--ink); background: var(--surface); font-size: 1.3rem; }
 .picker-note { flex-basis: 100%; color: var(--ink-soft); font-size: 0.85rem; }

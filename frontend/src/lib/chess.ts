@@ -14,7 +14,8 @@ export const PIECES: Piece[] = ["K", "Q", "R", "B", "N", "P", "k", "q", "r", "b"
 export const pieceName = (p: Piece) => tr(`piece.${p}`);
 
 // Filled glyphs for both colours; the colour comes from CSS (fill/stroke).
-export const GLYPH: Record<string, string> = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+// U+FE0E requests text presentation instead of emoji (♟ is an emoji on phones).
+export const GLYPH: Record<string, string> = { k: "♚\uFE0E", q: "♛\uFE0E", r: "♜\uFE0E", b: "♝\uFE0E", n: "♞\uFE0E", p: "♟\uFE0E" };
 
 export const squareName = (r: number, c: number) => `${FILES[c]}${8 - r}`;
 export const parseSquare = (s: string): [number, number] => [8 - Number(s[1]), FILES.indexOf(s[0])];

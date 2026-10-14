@@ -2,15 +2,14 @@ import { Chess, type Square } from "chess.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardView } from "./components/BoardView";
 import { PhoneLink } from "./components/PhoneLink";
+import { Piece } from "./components/Piece";
 import { PhotoView } from "./components/PhotoView";
 import { CLIENT_ID, health, latest, latestImage, prepareImage, recognize, saveFeedback, type Recognition } from "./lib/api";
 import {
-  GLYPH,
   PIECES,
   applyUci,
   boardToPlacement,
   describeMove,
-  isWhite,
   lichessUrl,
   parseSquare,
   pieceName,
@@ -21,6 +20,7 @@ import {
   type Board,
   type Castling,
   type Cell,
+  type Piece as PieceType,
   type Side,
 } from "./lib/chess";
 import { analyze, whitePerspective, type Analysis } from "./lib/engine";
@@ -371,8 +371,8 @@ export default function App() {
               <div className="picker" role="toolbar" aria-label={tr("picker.label", { square: selected })}>
                 <span className="picker-title">{selected}</span>
                 {PIECES.map((p) => (
-                  <button key={p} className={`pick ${isWhite(p) ? "pc-white" : "pc-black"}`} title={pieceName(p)} aria-label={pieceName(p)} onClick={() => setPiece(p)}>
-                    {GLYPH[p.toLowerCase()]}
+                  <button key={p} className="pick" title={pieceName(p)} aria-label={pieceName(p)} onClick={() => setPiece(p)}>
+                    <svg viewBox="0 0 100 100" aria-hidden="true"><Piece piece={p} /></svg>
                   </button>
                 ))}
                 <button className="pick pick-empty" title={tr("picker.empty")} aria-label={tr("picker.empty")} onClick={() => setPiece(".")}>
@@ -599,8 +599,8 @@ function PerspectiveBoard() {
       {cells}
       {pieces.map(([i, j, p, white]) => {
         const [x, y] = lerp(lerp(pt(i, j), pt(i, j + 1), 0.5), lerp(pt(i + 1, j), pt(i + 1, j + 1), 0.5), 0.55);
-        const size = 22 + i * 3.2;
-        return <text key={`${i}${j}`} x={x} y={y} fontSize={size} textAnchor="middle" className={white ? "pc pc-white" : "pc pc-black"}>{GLYPH[p]}</text>;
+        const box = 80 + i * 4; // closer rows are slightly larger
+        return <Piece key={`${i}${j}`} piece={(white ? p.toUpperCase() : p) as PieceType} x={x - box / 2} y={y - 0.8 * box} size={box} />;
       })}
       <g className="hero-grid">{lines}</g>
       {[tl, tr, br, bl].map(([x, y], i) => <circle key={i} cx={x} cy={y} r={5} className="hero-corner" />)}
