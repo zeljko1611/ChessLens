@@ -128,19 +128,21 @@ export default function App() {
 
   const onFile = async (file: File | undefined) => {
     if (!file) return;
+    let p: Photo;
+    try {
+      p = await prepareImage(file);
+    } catch {
+      setError(tr("server.not_an_image")); // not an image; keep the previous board
+      return;
+    }
     setError(null);
     setResult(null);
     setBoard(null);
     setAnalysis(null);
-    try {
-      const p = await prepareImage(file);
-      if (photo) URL.revokeObjectURL(photo.url);
-      setPhoto(p);
-      setCorners(null);
-      await run(p);
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    if (photo) URL.revokeObjectURL(photo.url);
+    setPhoto(p);
+    setCorners(null);
+    await run(p);
   };
 
   const editFen = board ? toFen(board, side, castling) : null;
