@@ -1,8 +1,4 @@
-"""Backend logic independent of the web framework (easy to test).
-
-User-facing errors are short codes (e.g. "board_not_found"); the frontend
-turns them into English or Serbian text.
-"""
+"""Backend logic independent of the web framework. Errors are short codes that the frontend translates."""
 
 from __future__ import annotations
 
@@ -31,6 +27,7 @@ class BadRequest(Exception):
 
 class Service:
     def __init__(self, model_dir: Path = MODEL_DIR, feedback_dir: Path = FEEDBACK_DIR):
+        self.model_dir = model_dir
         self.classifier: SquareClassifier = load_classifier(model_dir)
         self.feedback_dir = feedback_dir
         self._feedback_lock = threading.Lock()

@@ -1,11 +1,6 @@
-"""Position representation, FEN, legality checks and probability-based repair.
+"""FEN, legality checks and probability-based repair, without python-chess.
 
-A board is an 8x8 list of strings in board coordinates:
-board[0][0] = a8, board[0][7] = h8, board[7][0] = a1, board[7][7] = h1.
-An empty square is "."; pieces use FEN letters (uppercase = White).
-
-Deliberately without python-chess, so the backend stays light and the logic
-is fully under our control (and easy to test).
+board[0][0] is a8 and board[7][7] is h1; "." is an empty square, uppercase letters are White.
 """
 
 from __future__ import annotations
@@ -77,10 +72,6 @@ def fen_to_board(fen: str) -> Board:
     return board
 
 
-# --------------------------------------------------------------------------
-# Attacks (needed to know who is in check)
-# --------------------------------------------------------------------------
-
 _KNIGHT = [(-2, -1), (-2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2), (2, -1), (2, 1)]
 _KING = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 _ROOK_DIRS = [(-1, 0), (1, 0), (0, -1), (0, 1)]
@@ -132,11 +123,6 @@ def in_check(board: Board, white: bool) -> bool:
         return False
     r, c = kings[0]
     return is_attacked(board, r, c, by_white=not white)
-
-
-# --------------------------------------------------------------------------
-# Validation
-# --------------------------------------------------------------------------
 
 
 @dataclass
@@ -230,11 +216,6 @@ def full_fen(board: Board, side_to_move: str = "w", castling: str | None = None)
     if castling is None:
         castling = infer_castling(board)
     return f"{board_to_fen(board)} {side_to_move} {castling} - 0 1"
-
-
-# --------------------------------------------------------------------------
-# Repair based on model probabilities
-# --------------------------------------------------------------------------
 
 
 def _ranked(probs_row: np.ndarray) -> list[int]:

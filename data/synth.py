@@ -1,18 +1,5 @@
-"""Generator of synthetic chessboard photos.
+"""Synthetic chessboard photos: a flat board warped into perspective, with the pieces drawn upright.
 
-The board is drawn flat (top-down) and placed into the scene with a homography,
-as if photographed at an angle with a phone. Pieces are NOT warped with the
-board; they are drawn upright in image space, with their base at the square
-centre and a size that depends on the distance from the camera. This gives the
-key effect of real photos: pieces stick up out of their square and hide the
-squares behind them.
-
-For each image the generator stores:
-  - the FEN piece placement,
-  - the four playing-area corners in the image, in the order a8, h8, h1, a1,
-  - camera_rot: which side the camera is on (0 = White is closest to the camera).
-
-Usage:
     python data/synth.py --out data/synth_train --count 3000 --seed 1
 """
 
@@ -95,11 +82,6 @@ def glyph_mask(font_path: str, piece: str) -> np.ndarray:
     return arr[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
 
 
-# --------------------------------------------------------------------------
-# Positions
-# --------------------------------------------------------------------------
-
-
 def random_position(rng: random.Random) -> list[list[str]]:
     """A game-like position: start from the initial one and "play" it randomly."""
     for _ in range(200):
@@ -136,11 +118,6 @@ def random_position(rng: random.Random) -> list[list[str]]:
         if validate(board).ok:
             return board
     return fen_to_board(STARTING_BOARD_FEN)
-
-
-# --------------------------------------------------------------------------
-# Drawing
-# --------------------------------------------------------------------------
 
 
 def _jitter(color: tuple[int, int, int], rng: random.Random, amount: int = 18) -> np.ndarray:
@@ -233,7 +210,6 @@ def paste_piece(img: np.ndarray, mask: np.ndarray, base_xy: tuple[float, float],
         edge = _jitter((150, 140, 130), rng, 20)
     shade = np.linspace(1.08, 0.82, H, dtype=np.float32)[:, None, None]  # light from above
 
-    # Shadow on the board.
     shadow = np.zeros(img.shape[:2], np.float32)
     cv2.ellipse(shadow, (int(base_xy[0] + h * 0.1), int(base_xy[1] + h * 0.02)), (max(2, w // 2), max(1, h // 8)), 0, 0, 360, 1.0, -1)
     shadow = cv2.GaussianBlur(shadow, (0, 0), max(1, h / 20))
@@ -301,12 +277,10 @@ def photo_effects(img: np.ndarray, rng: random.Random) -> np.ndarray:
     dist = np.sqrt((xx - lx) ** 2 + (yy - ly) ** 2) / max(h, w)
     light = 1.15 - rng.uniform(0.1, 0.5) * dist
     img = img * light[..., None]
-    # Colour temperature, contrast, gamma.
     img = img * np.array([rng.uniform(0.85, 1.1), 1.0, rng.uniform(0.85, 1.1)], np.float32)
     img = (img - 128) * rng.uniform(0.8, 1.2) + 128 + rng.uniform(-25, 25)
     img = np.clip(img, 0, 255)
     img = 255 * (img / 255) ** rng.uniform(0.8, 1.25)
-    # Glare.
     if rng.random() < 0.3:
         glare = np.zeros((h, w), np.float32)
         cv2.circle(glare, (rng.randrange(w), rng.randrange(h)), rng.randint(30, 140), 1.0, -1)
@@ -325,7 +299,6 @@ def photo_effects(img: np.ndarray, rng: random.Random) -> np.ndarray:
         img = cv2.filter2D(img, -1, kernel / max(kernel.sum(), 1e-6))
     img = img + nprng.normal(0, rng.uniform(2, 8), img.shape)
     img = np.clip(img, 0, 255).astype(np.uint8)
-    # JPEG compression like on a phone.
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, rng.randint(55, 95)])
     return cv2.imdecode(buf, cv2.IMREAD_COLOR)
 

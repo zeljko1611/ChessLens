@@ -1,14 +1,6 @@
-"""Training the square classifier CNN (PyTorch) and exporting it to ONNX.
+"""Train the square classifier CNN in PyTorch and export it to ONNX.
 
-    pip install -r requirements-train.txt
-    python training/train_cnn.py --train data/train.npz --out models/ --epochs 15
     python training/train_cnn.py --train data/npz/a.npz data/npz/b.npz --weights 0.5 0.5 --out models/
-
-At the end the model is exported to models/square_cnn.onnx and the ONNX version
-is checked to give the same results as PyTorch.
-
-Input: a 64x32 (height x width) RGB crop, normalised as in
-chessvision/classifier.py (MEAN and STD must match).
 """
 
 from __future__ import annotations
@@ -170,50 +162,56 @@ def load_sources(paths: list[Path], val_frac: float, device: torch.device) -> li
     return sources
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--train", type=Path, nargs="+", required=True, help="one or more .npz files (make_dataset.py)")
-    ap.add_argument("--weights", type=float, nargs="*", help="share of each file in a batch (default: proportional to size)")
-    ap.add_argument("--out", type=Path, default=Path("models"))
-    ap.add_argument("--epochs", type=int, default=15)
-    ap.add_argument("--steps-per-epoch", type=int, default=0, help="0 = dataset size / batch size")
-    ap.add_argument("--batch-size", type=int, default=256)
-    ap.add_argument("--lr", type=float, default=2e-3)
-    ap.add_argument("--val-frac", type=float, default=0.15)
-    ap.add_argument("--init", type=Path, help="start from existing weights (fine-tuning on real photos)")
-    args = ap.parse_args()
+def mean_accuracy(accs: dict[str, float | None]) -> float:
+    """Every source with a validation split counts equally."""
+    vals = [v for v in accs.values() if v is not None]
+    return float(np.mean(vals)) if vals else 0.0
 
+
+def validate_sources(model: nn.Module, sources: list[dict], device: torch.device) -> dict[str, float | None]:
+    return {s["name"]: evaluate(model, s["X_va"], s["y_va"], device) if len(s["y_va"]) else None for s in sources}
+
+
+def train(paths: list[Path], out: Path, weights: list[float] | None = None, epochs: int = 15, steps_per_epoch: int = 0,
+          batch_size: int = 256, lr: float = 2e-3, val_frac: float = 0.15, init: Path | None = None,
+          on_epoch=None) -> dict:
+    """Train, keep the best epoch in out/square_cnn.pt and export it to ONNX.
+
+    Returns the validation accuracy per source before (only with `init`) and after training.
+    """
     torch.manual_seed(0)
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Device: {device}", flush=True)
 
-    sources = load_sources(args.train, args.val_frac, device)
+    sources = load_sources(paths, val_frac, device)
     sizes = np.array([len(s["y_tr"]) for s in sources], np.float64)
-    weights = np.array(args.weights, np.float64) if args.weights else sizes
-    if len(weights) != len(sources):
+    w = np.array(weights, np.float64) if weights else sizes
+    if len(w) != len(sources):
         raise SystemExit("--weights needs exactly one value per --train file")
-    weights = weights / weights.sum()
-    print("Batch share: " + ", ".join(f"{s['name']} {w:.2f}" for s, w in zip(sources, weights)))
+    w = w / w.sum()
+    print("Batch share: " + ", ".join(f"{s['name']} {x:.2f}" for s, x in zip(sources, w)))
 
     model = SquareNet().to(device)
-    if args.init:
-        model.load_state_dict(torch.load(args.init, map_location=device))
+    before = None
+    if init:
+        model.load_state_dict(torch.load(init, map_location=device))
+        before = validate_sources(model, sources, device)
     print(f"Parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M")
 
-    steps_per_epoch = args.steps_per_epoch or math.ceil(sizes.sum() / args.batch_size)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.epochs * steps_per_epoch)
+    steps_per_epoch = steps_per_epoch or math.ceil(sizes.sum() / batch_size)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=epochs * steps_per_epoch)
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.05)
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    best_acc, best_path = -1.0, args.out / "square_cnn.pt"
+    out.mkdir(parents=True, exist_ok=True)
+    best_acc, best_accs, best_path = -1.0, {}, out / "square_cnn.pt"
     gen = torch.Generator(device=device).manual_seed(0)
-    for epoch in range(args.epochs):
+    for epoch in range(epochs):
         model.train()
         t0, total = time.time(), 0.0
         for _ in range(steps_per_epoch):
             # Every batch mixes the sources in the given proportions.
-            counts = np.random.multinomial(args.batch_size, weights)
+            counts = np.random.multinomial(batch_size, w)
             xs, ts = [], []
             for src, k in zip(sources, counts):
                 if k:
@@ -227,18 +225,37 @@ def main() -> None:
             opt.step()
             sched.step()
             total += loss.item()
-        accs = {s["name"]: evaluate(model, s["X_va"], s["y_va"], device) for s in sources}
-        acc = float(np.mean(list(accs.values())))  # every source counts equally
-        detail = "  ".join(f"{k} {v * 100:.2f}%" for k, v in accs.items())
-        print(f"epoch {epoch + 1}/{args.epochs}  loss {total / steps_per_epoch:.4f}  val {acc * 100:.2f}% [{detail}]  ({time.time() - t0:.0f} s)",
+        accs = validate_sources(model, sources, device)
+        acc = mean_accuracy(accs)
+        detail = "  ".join(f"{k} {v * 100:.2f}%" for k, v in accs.items() if v is not None)
+        print(f"epoch {epoch + 1}/{epochs}  loss {total / steps_per_epoch:.4f}  val {acc * 100:.2f}% [{detail}]  ({time.time() - t0:.0f} s)",
               flush=True)
         if acc > best_acc:
-            best_acc = acc
+            best_acc, best_accs = acc, accs
             torch.save(model.state_dict(), best_path)
+        if on_epoch:
+            on_epoch(epoch + 1, epochs)
 
     model.load_state_dict(torch.load(best_path, map_location=device))
     print(f"Best mean square accuracy (validation): {best_acc * 100:.2f}%")
-    export_onnx(model, args.out / "square_cnn.onnx", sources[0]["X_va"][:64].cpu().numpy())
+    first = sources[0]
+    export_onnx(model, out / "square_cnn.onnx", (first["X_va"] if len(first["y_va"]) else first["X_tr"])[:64].cpu().numpy())
+    return {"before": before, "after": best_accs}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--train", type=Path, nargs="+", required=True, help="one or more .npz files (make_dataset.py)")
+    ap.add_argument("--weights", type=float, nargs="*", help="share of each file in a batch (default: proportional to size)")
+    ap.add_argument("--out", type=Path, default=Path("models"))
+    ap.add_argument("--epochs", type=int, default=15)
+    ap.add_argument("--steps-per-epoch", type=int, default=0, help="0 = dataset size / batch size")
+    ap.add_argument("--batch-size", type=int, default=256)
+    ap.add_argument("--lr", type=float, default=2e-3)
+    ap.add_argument("--val-frac", type=float, default=0.15)
+    ap.add_argument("--init", type=Path, help="start from existing weights (fine-tuning on real photos)")
+    args = ap.parse_args()
+    train(args.train, args.out, args.weights, args.epochs, args.steps_per_epoch, args.batch_size, args.lr, args.val_frac, args.init)
 
 
 if __name__ == "__main__":

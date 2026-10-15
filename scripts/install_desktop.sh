@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Adds "ChessLens" to the application menu (Linux: GNOME, KDE, XFCE...).
-# Remove it with: scripts/install_desktop.sh --remove
+# Adds "ChessLens" to the Linux application menu (--remove removes it).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 DEST="${XDG_DATA_HOME:-$HOME/.local/share}/applications/chess-vision.desktop"

@@ -1,21 +1,7 @@
-"""FastAPI server.
+"""FastAPI server: `uvicorn backend.app:app --reload --port 8000`.
 
-    uvicorn backend.app:app --reload --port 8000
-
-    GET  /api/health      which model is loaded
-    POST /api/recognize   multipart: image (+ optional corners, orientation, side_to_move, client)
-    GET  /api/latest      the latest recognition (?since=id), so a photo taken on a phone
-                          shows up on the computer right away; the image is at /api/latest/image
-    POST /api/feedback    multipart: image, corners (a8, h8, h1, a1), placement
-
-Errors are returned as a code in the "detail" field (e.g. "board_not_found").
-If frontend/dist exists (after `npm run build`), the server serves it as well.
-
-Environment variables set by scripts/start_app.sh:
-  CHESSVISION_IDLE_TIMEOUT  seconds without requests after which the server stops
-                            (an open app polls /api/latest every 2 seconds)
-  CHESSVISION_PHONE_PORT    the server is reachable on the home network; /api/health
-                            then returns the address for phones (phone_url)
+Errors are returned as codes in "detail" (e.g. "board_not_found"). scripts/start_app.sh sets
+CHESSVISION_IDLE_TIMEOUT (stop after that many idle seconds) and CHESSVISION_PHONE_PORT (report a LAN address).
 """
 
 from __future__ import annotations
@@ -29,7 +15,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -38,11 +24,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from backend.service import BadRequest, Service  # noqa: E402
+from backend.training import Trainer  # noqa: E402
+from chessvision.classifier import load_classifier  # noqa: E402
 
 MAX_UPLOAD = 15 * 1024 * 1024
 IDLE_TIMEOUT = float(os.environ.get("CHESSVISION_IDLE_TIMEOUT", "0"))
 PHONE_PORT = os.environ.get("CHESSVISION_PHONE_PORT")
 service: Service | None = None
+trainer: Trainer | None = None
 last_request = time.monotonic()
 # The latest recognition from any device: {"id", "client", "result"} and the uploaded image.
 latest: dict = {"id": 0}
@@ -52,7 +41,7 @@ latest_image = b""
 def _shutdown_when_idle() -> None:
     while True:
         time.sleep(5)
-        if time.monotonic() - last_request > IDLE_TIMEOUT:
+        if time.monotonic() - last_request > IDLE_TIMEOUT and not (trainer and trainer.running):
             os.kill(os.getpid(), signal.SIGINT)  # same as Ctrl+C
             return
 
@@ -70,11 +59,13 @@ def lan_ip() -> str | None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global service
+    global service, trainer
     service = Service()
+    trainer = Trainer(service.model_dir, service.feedback_dir)
     if IDLE_TIMEOUT > 0:
         threading.Thread(target=_shutdown_when_idle, daemon=True).start()
     yield
+    trainer.stop()
 
 
 app = FastAPI(title="Chess Vision", lifespan=lifespan)
@@ -147,6 +138,40 @@ async def feedback_endpoint(image: UploadFile = File(...), corners: str = Form(.
         return await run_in_threadpool(service.save_feedback, data, corners, placement)
     except BadRequest as e:
         raise HTTPException(422, str(e)) from e
+
+
+def is_local(request: Request) -> bool:
+    """Training and model changes are allowed only on the computer running the server, not from phones."""
+    return request.client is not None and request.client.host in ("127.0.0.1", "::1")
+
+
+@app.get("/api/training")
+def training_status(request: Request) -> dict:
+    assert trainer is not None
+    return {**trainer.status(), "local": is_local(request)}
+
+
+@app.post("/api/training/{action}")
+def training_action(action: str, request: Request) -> dict:
+    assert service is not None and trainer is not None
+    if not is_local(request):
+        raise HTTPException(403, "training_local_only")
+    try:
+        if action == "start":
+            trainer.start()
+        elif action == "accept":
+            trainer.accept()
+            service.classifier = load_classifier(service.model_dir)
+        elif action == "restore":
+            trainer.restore_previous()
+            service.classifier = load_classifier(service.model_dir)
+        elif action == "discard":
+            trainer.discard()
+        else:
+            raise HTTPException(404, "unknown_action")
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    return {**trainer.status(), "local": True}
 
 
 DIST = ROOT / "frontend" / "dist"

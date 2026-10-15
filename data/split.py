@@ -1,10 +1,6 @@
-"""Split a folder (labels.jsonl + images/) into train and test parts.
-
-The same position (e.g. two photos of the same board) always goes to the same
-part, so the test set never contains images the model has practically seen.
+"""Split labels.jsonl into train and test by position, so one position never ends up in both.
 
     python data/split.py --src data/real/samryan18 --test-frac 0.2
-    # -> data/real/samryan18_train, data/real/samryan18_test
 """
 
 from __future__ import annotations

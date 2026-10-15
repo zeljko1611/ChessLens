@@ -1,14 +1,4 @@
-"""Conversion of the chesscog dataset (realistic 3D renders, Wölflein & Arandjelović 2021) to our format.
-
-Dataset: https://osf.io/xf3ka/ (CC BY 4.0). After unpacking, every image
-NNNN.png has an NNNN.json next to it with the fields:
-  fen      piece placement
-  corners  the four playing-area corners in pixels (not in a8, h8, h1, a1 order)
-  pieces   [{piece, square, box: [x, y, w, h]}]
-
-The corner order is recovered from the piece boxes: of the 8 possible orders
-(4 rotations x 2 directions), we pick the one where the bottom of each piece
-box falls into the square given in its label.
+"""Convert the chesscog renders (https://osf.io/xf3ka/, CC BY 4.0) to labels.jsonl; corner order comes from the piece boxes.
 
     python data/chesscog.py --src ~/datasets/chesscog/ex/train --out data/chesscog_train
 """

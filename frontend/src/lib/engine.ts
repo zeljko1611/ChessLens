@@ -1,4 +1,4 @@
-// Position analysis: Stockfish in the browser (Web Worker).
+// Stockfish in the browser (Web Worker).
 import { tr } from "./i18n";
 
 export interface Analysis {

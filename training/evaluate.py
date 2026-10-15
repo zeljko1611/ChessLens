@@ -1,16 +1,6 @@
-"""Evaluation of the WHOLE system on labeled photos.
+"""Evaluate the whole pipeline (detection, model, orientation, repair) on labeled photos.
 
-Unlike per-crop accuracy (train_cnn.py), this runs the same code as the app:
-detection -> crops -> model -> orientation -> repair.
-
-Metrics:
-  - detection: share of images where the board is found with error < 0.25 squares
-  - square accuracy: correct squares out of 64 (on images where the board was found)
-  - perfect boards: share of images with all 64 squares correct (the strictest metric)
-  - at most 1 error: share of images with at most one wrong square
-  - orientation: whether the board is rotated correctly (a1 in the right place)
-
-    python training/evaluate.py --data data/generated/test --models models/ --json results/test.json
+    python training/evaluate.py --data data/chesscog_test --models models/ --json results/test.json
 """
 
 from __future__ import annotations

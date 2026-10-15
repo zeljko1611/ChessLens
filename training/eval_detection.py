@@ -1,8 +1,4 @@
-"""Board detection accuracy on labeled images.
-
-The error is the mean offset of the four corners, measured in square sizes
-(0.25 = a quarter of a square). A detection counts as successful when the error
-is below 0.25 squares, because every square is then still cropped correctly.
+"""Board detection accuracy: mean corner error in square sizes (below 0.25 counts as a success).
 
     python training/eval_detection.py --data data/synth_test
 """

@@ -1,8 +1,4 @@
-"""Square classifier: a CNN trained in PyTorch and exported to ONNX.
-
-The backend does not depend on PyTorch; the model runs on onnxruntime.
-predict_proba(crops) returns (N, 13) probabilities in the order of CLASSES.
-"""
+"""Square classifier: a CNN exported to ONNX and run with onnxruntime (no PyTorch needed)."""
 
 from __future__ import annotations
 

@@ -2,6 +2,7 @@ import { Chess, type Square } from "chess.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardView } from "./components/BoardView";
 import { PhoneLink } from "./components/PhoneLink";
+import { TrainPanel } from "./components/TrainPanel";
 import { Piece } from "./components/Piece";
 import { PhotoView } from "./components/PhotoView";
 import { CLIENT_ID, health, latest, latestImage, prepareImage, recognize, saveFeedback, type Recognition } from "./lib/api";
@@ -52,6 +53,7 @@ export default function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<{ state: "idle" | "saving" | "saved" | "error"; text?: string }>({ state: "idle" });
+  const [savedCount, setSavedCount] = useState(0);
   const analysisId = useRef(0);
   const [phoneUrl, setPhoneUrl] = useState<string | null>(null);
 
@@ -157,7 +159,6 @@ export default function App() {
   // After mate or a draw there is nothing to analyse (Stockfish returns no score).
   const gameOver = playing && !!chess.current?.isGameOver();
 
-  // Analyse automatically whenever the position changes (and is legal).
   useEffect(() => {
     if (!fen || errors.length || gameOver) {
       analysisId.current++; // discard an analysis that may still be running
@@ -194,6 +195,7 @@ export default function App() {
     try {
       const res = await saveFeedback(photo.blob, result.corners, boardToPlacement(board));
       setFeedback({ state: "saved", text: tr("teach.savedCount", { n: res.count }) });
+      setSavedCount(res.count);
     } catch (e) {
       setFeedback({ state: "error", text: (e as Error).message });
     }
@@ -490,6 +492,7 @@ export default function App() {
                 <p className={feedback.state === "error" ? "error" : "hint"}>
                   {feedback.text ?? tr("teach.hint")}
                 </p>
+                <TrainPanel savedCount={savedCount} />
               </div>
             )}
 
@@ -530,7 +533,6 @@ function PlayPanel({ game, onReset, onEdit }: { game: Chess; onReset: () => void
   );
 }
 
-/** Language switch: SR | EN. */
 function LangSwitch({ lang }: { lang: Lang }) {
   return (
     <div className="segmented lang-switch" role="radiogroup" aria-label={tr("lang.label")}>

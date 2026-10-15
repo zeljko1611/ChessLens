@@ -16,6 +16,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY chessvision/ chessvision/
 COPY backend/ backend/
+COPY training/ training/
 COPY models/ models/
 COPY --from=web /web/dist frontend/dist
 EXPOSE 8000

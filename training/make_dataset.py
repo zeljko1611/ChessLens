@@ -1,16 +1,8 @@
-"""Turns labeled photos into a dataset of square crops for training.
+"""Build an .npz of square crops (X), class indices (y) and image ids (group) from labeled photos.
 
-The input is a folder with `labels.jsonl` (the format of data/synth.py or
-data/chesscog.py): for each image a FEN and the four playing-area corners
-(a8, h8, h1, a1). The output is an .npz with:
-  X      uint8 (N, 64, 32, 3)  crops
-  y      int64 (N,)            class index (see chessvision.position.CLASSES)
-  group  int64 (N,)            image index (so splits never mix crops of one image)
+Corners are jittered (--jitter) so the model tolerates imperfect detection.
 
-Corners are deliberately jittered (--jitter) so the model also works when the
-board detection is not perfect.
-
-    python training/make_dataset.py --data data/generated/train_a data/generated/train_b --out data/train.npz --jitter 0.06
+    python training/make_dataset.py --data data/chesscog_train --out data/npz/chesscog.npz
 """
 
 from __future__ import annotations

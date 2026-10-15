@@ -1,13 +1,7 @@
-"""Cutting the 64 squares out of the photo and finding the board orientation.
+"""Square crops and board orientation.
 
-Squares are NOT cut from a rectified (top-down) image but directly from the
-photo: pieces stand upright in the image, so each crop starts at the bottom
-edge of the square and goes up, tall enough to include a king. This way every
-crop looks similar regardless of the camera angle.
-
-Grid coordinates: corners[0] is grid corner (0, 0), corners[1] is (8, 0),
-corners[2] is (8, 8) and corners[3] is (0, 8). Square grid[r][c] lies between
-lines r..r+1 (from corners[0] towards corners[3]) and c..c+1 (towards corners[1]).
+Crops are cut from the photo itself, not from a rectified image, so pieces stay upright at any camera angle.
+corners[0..3] are the grid corners (0, 0), (8, 0), (8, 8) and (0, 8).
 """
 
 from __future__ import annotations
@@ -15,7 +9,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-CROP_W, CROP_H = 32, 64  # a crop is twice as tall as it is wide
+CROP_W, CROP_H = 32, 64
 HEIGHT_FACTOR = 2.0  # crop height relative to the square width in the image
 
 
@@ -78,9 +72,7 @@ def square_brightness(image: np.ndarray, corners: np.ndarray, cell: int = 24) ->
     return np.median(cells, axis=2).astype(np.float32)
 
 
-# --------------------------------------------------------------------------
-# Orientation: which grid rotation puts a8 in the top-left corner
-# --------------------------------------------------------------------------
+# Orientation: which grid rotation puts a8 in the top-left corner.
 # Rules used:
 #  1. h1 (and a8) are light squares -> decides between rotations {0, 2} and {1, 3}.
 #  2. White is usually on the "bottom" side (ranks 1-2) and Black on the top ->

@@ -1,22 +1,8 @@
-"""Import of photos whose position (FEN) is known but whose board corners are not.
+"""Import photos labeled only by a FEN in the file name (e.g. samryan18/chess-dataset).
 
-Example: samryan18/chess-dataset (500 real photos, MIT licence), where the FEN
-is written in the file name ("1B2b3-Kp6-8-8-2k5-8-8-8.JPG").
+The orientation is the one where the occupied squares match the FEN; unconvincing matches are rejected.
 
-    git clone --depth 1 https://github.com/samryan18/chess-dataset
     python data/import_fen_photos.py --src chess-dataset/labeled_originals --out data/real/samryan18
-
-For each image:
-  1. our detector finds the 8x8 grid (no corner labels needed);
-  2. of the 4 possible orientations, the one where the OCCUPIED squares from the
-     FEN best match the image is chosen. Occupancy is the difference between a
-     square and its "empty" colour (light/dark), which does not depend on the
-     model recognising pieces; the rule that h1 is a light square also applies;
-  3. the image is kept only if the match is convincing (--min-agree) and the
-     second-best orientation is clearly worse, since bad labels would hurt training.
-
-The output uses the format of data/synth.py (labels.jsonl + images/), so
-training/make_dataset.py reads it as is.
 """
 
 from __future__ import annotations

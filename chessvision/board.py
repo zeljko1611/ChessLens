@@ -1,20 +1,7 @@
-"""Chessboard detection with classical computer vision (no ML).
+"""Chessboard detection without ML.
 
-Main approach (robust to pieces covering the board):
-1. Find "X" points, where four squares meet. They are intensity saddle points
-   (negative Hessian determinant), searched at several scales.
-2. RANSAC: a hypothesis is a single square (a point, two neighbours and the
-   fourth point), grown step by step into the whole lattice (a homography fitted
-   to more and more nodes). The lattice with the most matching nodes wins.
-3. Choose which 9x9 window of that lattice is the board (node count plus the
-   checkerboard contrast inside versus outside the board).
-
-Fallback (if 1-3 fail): quadrilateral contours, a search for the 8x8 grid
-inside each, and local corner refinement.
-
-The result is the four corners of the playing area in image coordinates,
-clockwise from the top-left (TL, TR, BR, BL). Which corner is which square
-(a1, h1, ...) is decided later from the board content.
+Saddle points (X-corners) are fitted with RANSAC into a lattice and the 9x9 window that is the board is
+chosen; quadrilateral contours are the fallback. Returns the playing-area corners clockwise from the top-left.
 """
 
 from __future__ import annotations
@@ -46,11 +33,6 @@ class BoardDetection:
         return cv2.getPerspectiveTransform(self.corners.astype(np.float32), dst)
 
 
-# --------------------------------------------------------------------------
-# Geometry
-# --------------------------------------------------------------------------
-
-
 def order_corners(pts: np.ndarray) -> np.ndarray:
     """Order four points clockwise: TL, TR, BR, BL."""
     pts = np.asarray(pts, np.float32).reshape(4, 2)
@@ -69,11 +51,6 @@ def _quad_ok(q: np.ndarray, img_area: float) -> bool:
         return False
     sides = [np.linalg.norm(q[i] - q[(i + 1) % 4]) for i in range(4)]
     return min(sides) > 0.2 * max(sides)
-
-
-# --------------------------------------------------------------------------
-# Candidates
-# --------------------------------------------------------------------------
 
 
 def _approx_quad(contour: np.ndarray) -> np.ndarray | None:
@@ -124,11 +101,6 @@ def candidate_quads(gray: np.ndarray, max_candidates: int = 12) -> list[np.ndarr
     return unique[:max_candidates]
 
 
-# --------------------------------------------------------------------------
-# Grid score
-# --------------------------------------------------------------------------
-
-
 def grid_score(gray: np.ndarray, corners: np.ndarray, cell: int = REFINE_CELL) -> float:
     """How well four corners describe an 8x8 checkerboard in the image.
 
@@ -172,7 +144,7 @@ def find_lattice(gray: np.ndarray, quad: np.ndarray) -> tuple[np.ndarray, float]
     best = (-1.0, 0.0, 0.0, N / 8)
     for s in np.arange(N / 8 * 0.62, N / 8 * 1.001, 1.0):
         k = max(3, int(s * 0.5) | 1)
-        box = cv2.blur(warped, (k, k))  # local mean around every point
+        box = cv2.blur(warped, (k, k))
         span = int(8 * s)
         if span > N:
             continue
@@ -215,15 +187,6 @@ def refine_corners(gray: np.ndarray, corners: np.ndarray, iters: int = 3) -> tup
             if not improved:
                 break
     return corners, best
-
-
-# --------------------------------------------------------------------------
-# Main approach: inner "X" corners of the grid + RANSAC
-# --------------------------------------------------------------------------
-# Points where four squares meet are intensity saddle points (negative Hessian
-# determinant). Pieces hide some of them, but enough remain to fit the
-# homography of a regular grid. This is far more robust than contours when
-# pieces on the back rank break the outline of the board.
 
 
 def saddle_points(gray: np.ndarray, max_points: int = 400) -> np.ndarray:

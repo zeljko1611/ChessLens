@@ -7,6 +7,8 @@ data/generated/
 data/*.npz
 models/*.pt
 !models/square_cnn.pt
+models/candidate/
+models/previous/
 results/errors/
 .pytest_cache/
 data/feedback/

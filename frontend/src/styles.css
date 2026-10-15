@@ -1,18 +1,10 @@
-/* Chess glyphs from Noto Sans Symbols 2 (SIL OFL 1.1), only ♚♛♜♝♞♟, used in the
-   move list. Without it phones render them as fixed-colour emoji. */
+/* Chess glyphs for the move list (Noto Sans Symbols 2, SIL OFL 1.1). */
 @font-face {
   font-family: "ChessPieces";
   src: url("./assets/chess-pieces.ttf") format("truetype");
   unicode-range: U+265A-265F;
 }
 
-/*
-  ChessLens visual system
-  Colours come from over-the-board chess: a wooden board (maple and walnut), the
-  blue ink of a score sheet, and a green arrow as in analysis tools.
-  One thing is loud: the board (and the detection grid over the photo).
-  Everything else stays calm.
-*/
 :root {
   --paper: #e9eee9;
   --surface: #f6f8f5;
@@ -271,6 +263,11 @@ button, input, select { font: inherit; color: inherit; }
 
 .teach { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1.5px solid var(--rule); }
 .teach p { margin: 0; flex: 1 1 220px; }
+.train { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; flex-basis: 100%; }
+.train-result { border-collapse: collapse; font-size: 0.92rem; flex-basis: 100%; }
+.train-result th, .train-result td { padding: 0.2rem 0.75rem 0.2rem 0; text-align: left; font-weight: 520; }
+.train-result td { font-variant-numeric: tabular-nums; }
+.train-result thead th { color: var(--ink-soft); font-weight: 450; }
 
 
 /* ------------------------------------------------------------------ mobile */

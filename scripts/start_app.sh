@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-# Starts ChessLens without a terminal (used by the application menu entry).
-#
-#  1. If the server is already running, just open the app in the browser.
-#  2. Otherwise build the frontend if needed (when the code is newer than
-#     frontend/dist), start the server in the background and wait for it.
-#  3. The server stops by itself ~5 minutes after the app is closed
-#     (CHESSVISION_IDLE_TIMEOUT), or manually with scripts/stop_app.sh.
-#  The server is also reachable from phones on the same Wi-Fi network; the
-#  address (and the QR code behind the "On phone" button) comes from /api/health.
+# Starts ChessLens from the application menu: builds the frontend if needed, starts the
+# server in the background (it stops when idle) and opens the browser.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"

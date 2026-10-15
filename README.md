@@ -1,10 +1,21 @@
 # ChessLens
 
+[![CI](https://github.com/zeljko1611/ChessLens/actions/workflows/ci.yml/badge.svg)](https://github.com/zeljko1611/ChessLens/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ChessLens recognizes a chess position from a photo of a physical board, converts it to FEN and shows the best move (Stockfish). A misrecognized square can be fixed with one click, and if the detection misses the board, its four corners can be dragged into place. You can play on from the recognized position on the same board, and one button restores the position from the photo. The interface is available in English (default) and Serbian.
 
 ![ChessLens](docs/screenshot-desktop.png)
 
 **Stack:** Python (OpenCV, NumPy, PyTorch → ONNX), FastAPI, React + TypeScript (Vite), Stockfish in the browser.
+
+## Highlights
+
+- Board detection without machine learning: saddle points (X-corners) fitted with RANSAC into the 8×8 grid, robust to pieces covering the board edge.
+- A small CNN (0.84M parameters) trained in PyTorch and served with onnxruntime: 99.3 % of squares and 91.8 % of complete boards correct on real photos.
+- The model's probabilities are turned into the most likely legal position (one king per side, no pawns on the back ranks, ...).
+- Works from a phone on the same Wi-Fi network (QR code), and a photo taken on the phone appears on the computer.
+- The model can be fine-tuned on your own board from the app, with a before/after comparison and a way back to the previous model.
 
 ## How it works
 
@@ -29,7 +40,14 @@ The whole system (detection + model + orientation), measured with `training/eval
 
 Training data: chesscog (4,400 renders), 379 real photos from samryan18 and 1,500 synthetic images; 25 epochs on a GTX 1650. The previous model (HOG + MLP) recognized 65 % of the squares and no complete board on the chesscog test set.
 
-**Limitation:** the real photos show a single board shot from above, and chesscog renders a single piece set. Accuracy is noticeably lower on other piece sets, at steep angles or with a diagonally rotated board. That is why the app has a *Save for training* button: corrected photos are stored in `data/feedback/` and can be used to fine-tune the model on your own board.
+**Limitation:** the real photos show a single board shot from above, and chesscog renders a single piece set. Accuracy is noticeably lower on other piece sets, at steep angles or with a diagonally rotated board. That is why the app has a *Save for training* button: corrected photos are stored in `data/feedback/`, and once there are at least 10, *Train on my photos* fine-tunes the model in a few minutes and shows the accuracy of the current and the new model before you switch.
+
+## Challenges
+
+- **Board contours were not enough.** Pieces on the back rank break the outline of the board, so detection moved to the X-corners inside it.
+- **The first model did not generalize.** A HOG + MLP baseline recognized 65 % of the squares on chesscog renders; the CNN with heavy augmentation reaches 99.5 % on the same set.
+- **The grid was shifted by one row at steep angles,** because border lines often have no X-corners. Scoring each side of the board separately (checkerboard pattern inside, none outside) raised detection on chesscog renders from 83 % to 91 %.
+- **Black pieces looked white in Samsung Internet's dark mode,** which recolours text. Pieces are now drawn as SVG paths instead of Unicode glyphs.
 
 ## Running
 
@@ -62,7 +80,7 @@ python training/train_cnn.py --train data/npz/chesscog.npz data/npz/synth.npz --
 python training/evaluate.py --data data/chesscog_test --models models/
 ```
 
-Fine-tuning on your own board: `python training/make_dataset.py --data data/feedback --repeat 8 --out data/npz/feedback.npz`, then run `train_cnn.py` with the same datasets plus `feedback.npz` and `--init models/square_cnn.pt`.
+Fine-tuning on your own board: `python training/finetune.py` mixes the photos saved in the app (at least 10) with the original crops in `data/npz/`, holds out every fifth photo and writes the new model with a before/after comparison to `models/candidate/`. The *Train on my photos* button runs the same script (only where PyTorch and `data/npz/` are installed).
 
 ## Tests
 
@@ -83,3 +101,14 @@ models/        trained model (square_cnn.onnx, square_cnn.pt)
 scripts/       launcher without a terminal (Linux)
 tests/
 ```
+
+## Credits
+
+- Piece shapes come from [Noto Sans Symbols 2](https://fonts.google.com/noto/specimen/Noto+Sans+Symbols+2) (SIL Open Font License 1.1).
+- Rendered training and test images: [chesscog](https://osf.io/xf3ka/) by Wölflein and Arandjelović (CC BY 4.0).
+- Real photos: [samryan18/chess-dataset](https://github.com/samryan18/chess-dataset).
+- Analysis: [Stockfish](https://stockfishchess.org/) (stockfish.js), game rules in the browser: [chess.js](https://github.com/jhlywa/chess.js).
+
+## License
+
+MIT, see [LICENSE](LICENSE).

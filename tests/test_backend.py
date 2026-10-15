@@ -10,6 +10,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "data"))
+sys.path.insert(0, str(ROOT / "training"))
 
 from synth import available_fonts, render  # noqa: E402
 
@@ -86,6 +87,11 @@ def test_http_api():
         assert client.get(f"/api/latest?since={latest['id']}").json() == {"id": latest["id"]}
         assert client.get("/api/latest/image").content == data
 
+        training = client.get("/api/training").json()
+        assert training["state"] in ("idle", "done") and training["min_photos"] > 0
+        assert not training["local"]  # the test client is not 127.0.0.1, like a phone on the Wi-Fi
+        assert client.post("/api/training/start").json()["detail"] == "training_local_only"
+
 
 def test_save_feedback(tmp_path):
     if not HAS_MODEL:
@@ -105,3 +111,36 @@ def test_save_feedback(tmp_path):
         pass
     else:
         raise AssertionError("an illegal position must not be saved")
+
+
+def test_training_holdout_and_model_swap(tmp_path):
+    from finetune import split_rows
+
+    from backend.training import Trainer
+
+    train, holdout = split_rows(list(range(12)))
+    assert holdout == [4, 9] and len(train) == 10
+
+    models, candidate = tmp_path / "models", tmp_path / "models" / "candidate"
+    candidate.mkdir(parents=True)
+    for name in ("square_cnn.onnx", "square_cnn.pt"):
+        (models / name).write_text("old")
+        (candidate / name).write_text("new")
+    (candidate / "result.json").write_text('{"own": {}, "others": {}}')
+
+    trainer = Trainer(models, tmp_path / "feedback", npz_dir=tmp_path / "npz")
+    assert not trainer.available and trainer.state == "done"  # a finished run survives a server restart
+    try:
+        trainer.start()
+    except ValueError as e:
+        assert str(e) == "training_unavailable"
+    else:
+        raise AssertionError("training needs PyTorch and data/npz")
+    trainer.accept()
+    assert (models / "square_cnn.onnx").read_text() == "new"
+    assert (models / "previous" / "square_cnn.onnx").read_text() == "old"
+    assert not candidate.exists() and trainer.status()["state"] == "idle"
+
+    trainer.restore_previous()
+    assert (models / "square_cnn.onnx").read_text() == "old"
+    assert (models / "previous" / "square_cnn.onnx").read_text() == "new"  # restoring again would undo it

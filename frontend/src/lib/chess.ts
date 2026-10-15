@@ -1,5 +1,4 @@
-// A small chess helper library for the UI (FEN, checks, moves).
-// The rules are the same as in chessvision/position.py.
+// Chess helpers for the UI (FEN, legality, moves); the rules match chessvision/position.py.
 import { tr } from "./i18n";
 
 export type Piece = "P" | "N" | "B" | "R" | "Q" | "K" | "p" | "n" | "b" | "r" | "q" | "k";
@@ -81,8 +80,6 @@ export function toFen(board: Board, side: Side, castling: Castling): string {
   return `${boardToPlacement(board)} ${side} ${castlingString(castling, board)} - 0 1`;
 }
 
-// --- Attacks and checks ----------------------------------------------------
-
 const inside = (r: number, c: number) => r >= 0 && r < 8 && c >= 0 && c < 8;
 
 function attacked(board: Board, r: number, c: number, byWhite: boolean): boolean {
@@ -140,8 +137,6 @@ export function validate(board: Board, side: Side): string[] {
   }
   return errors;
 }
-
-// --- Moves ------------------------------------------------------------------
 
 export interface UciMove { from: [number, number]; to: [number, number]; promotion?: string }
 

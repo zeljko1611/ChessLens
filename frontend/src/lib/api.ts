@@ -75,6 +75,27 @@ export async function saveFeedback(image: Blob, corners: [number, number][], pla
   return asJson(await fetch("/api/feedback", { method: "POST", body: form }));
 }
 
+export interface TrainingStatus {
+  available: boolean; // PyTorch and the original training data are installed
+  local: boolean; // training can be started only on the computer running the server
+  photos: number;
+  min_photos: number;
+  state: "idle" | "running" | "done" | "failed";
+  progress: { step?: "start" | "crops" | "train" | "evaluate"; epoch?: number; epochs?: number };
+  // Square accuracy before and after: on held-out saved photos and on the original validation data.
+  result: { photos: number; held_out: number; own: { before: number; after: number }; others: { before: number; after: number } } | null;
+  error: string | null;
+  has_previous: boolean; // a model replaced by fine-tuning is kept in models/previous/
+}
+
+export async function trainingStatus(): Promise<TrainingStatus> {
+  return asJson(await fetch("/api/training"));
+}
+
+export async function trainingAction(action: "start" | "accept" | "discard" | "restore"): Promise<TrainingStatus> {
+  return asJson(await fetch(`/api/training/${action}`, { method: "POST" }));
+}
+
 export interface Latest {
   id: number;
   client?: string | null;
