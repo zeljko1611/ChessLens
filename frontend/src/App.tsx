@@ -152,10 +152,15 @@ export default function App() {
   const allowed = board ? possibleCastling(board) : null;
   const uncertain = useMemo(() => new Set(result?.uncertain ?? []), [result]);
 
+  // After mate or a draw there is nothing to analyse (Stockfish returns no score).
+  const gameOver = playing && !!chess.current?.isGameOver();
+
   // Analyse automatically whenever the position changes (and is legal).
   useEffect(() => {
-    if (!fen || errors.length) {
+    if (!fen || errors.length || gameOver) {
+      analysisId.current++; // discard an analysis that may still be running
       setAnalysis(null);
+      setAnalyzing(false);
       return;
     }
     const id = ++analysisId.current;
@@ -170,7 +175,7 @@ export default function App() {
         .finally(() => id === analysisId.current && setAnalyzing(false));
     }, 350);
     return () => clearTimeout(t);
-  }, [fen, errors.length]);
+  }, [fen, errors.length, gameOver]);
 
   const setPiece = (piece: Cell) => {
     if (!board || !selected) return;
@@ -424,7 +429,7 @@ export default function App() {
             </>
             )}
 
-            {!errors.length && (
+            {!errors.length && !gameOver && (
               <div className="analysis" aria-live="polite">
                 <div className="analysis-head">
                   <span className="eval">{analysisError ? "–" : evalView?.text ?? "…"}</span>
