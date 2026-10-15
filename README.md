@@ -104,7 +104,7 @@ tests/
 
 ## Credits
 
-- Piece shapes come from [Noto Sans Symbols 2](https://fonts.google.com/noto/specimen/Noto+Sans+Symbols+2) (SIL Open Font License 1.1).
+- Piece shapes come from [Noto Sans Symbols 2](https://fonts.google.com/noto/specimen/Noto+Sans+Symbols+2) (SIL Open Font License 1.1, see `frontend/src/assets/OFL.txt`).
 - Rendered training and test images: [chesscog](https://osf.io/xf3ka/) by Wölflein and Arandjelović (CC BY 4.0).
 - Real photos: [samryan18/chess-dataset](https://github.com/samryan18/chess-dataset).
 - Analysis: [Stockfish](https://stockfishchess.org/) (stockfish.js), game rules in the browser: [chess.js](https://github.com/jhlywa/chess.js).

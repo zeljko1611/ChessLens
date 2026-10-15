@@ -1,7 +1,7 @@
 [project]
 name = "chesslens"
 version = "0.1.0"
-description = "Recognise a chess position from a photo of a physical board"
+description = "Recognize a chess position from a photo of a physical board"
 requires-python = ">=3.10"
 
 [tool.pytest.ini_options]

@@ -68,7 +68,7 @@ async def lifespan(_: FastAPI):
     trainer.stop()
 
 
-app = FastAPI(title="Chess Vision", lifespan=lifespan)
+app = FastAPI(title="ChessLens", lifespan=lifespan)
 app.add_middleware(  # for `npm run dev` (Vite on port 5173)
     CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["*"], allow_headers=["*"]
 )
