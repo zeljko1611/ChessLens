@@ -29,6 +29,9 @@ LATTICE_N = 400  # size of the rectified candidate used for the grid search
 REFINE_CELL = 16  # pixels per square during refinement
 RING_WEIGHT = 0.1  # how many nodes one grey level of ring_score is worth
 PLAIN_WEIGHT = 1.0  # weight of the unsigned term in ring_score
+# Minimum grid_score for a detection to count as a board. Measured: real boards score
+# 107+ (RANSAC) and 142+ (contours); images without a board score at most 16 and 60.
+MIN_GRID_SCORE = 80.0
 WINDOW_SLACK = 3  # windows with up to this many fewer nodes than the best are compared by ring_score
 
 
@@ -460,7 +463,9 @@ def detect_board(image: np.ndarray, seed: int = 0) -> BoardDetection | None:
     grid = fit_grid(gray, saddle_points(gray), rng)
     if grid is not None:
         corners = order_corners(grid)
-        return BoardDetection(corners=corners / scale, score=grid_score(gray, corners))
+        score = grid_score(gray, corners)
+        if score >= MIN_GRID_SCORE:
+            return BoardDetection(corners=corners / scale, score=score)
 
     # Fallback: quadrilateral contours + a grid search inside each.
     scored: list[tuple[float, np.ndarray]] = []
@@ -472,6 +477,8 @@ def detect_board(image: np.ndarray, seed: int = 0) -> BoardDetection | None:
         return None
     score, corners = max(scored, key=lambda t: t[0])
     corners, score = refine_corners(gray, corners)
+    if score < MIN_GRID_SCORE:  # the fallback always finds some quadrilateral, even the image border
+        return None
     return BoardDetection(corners=order_corners(corners) / scale, score=score)
 
 

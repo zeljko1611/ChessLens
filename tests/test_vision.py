@@ -43,6 +43,13 @@ def test_detect_board_on_synthetic_images():
     assert sum(e < 0.25 for e in errors) >= 5, errors
 
 
+def test_no_board_on_image_without_board():
+    # The contour fallback always finds some quadrilateral; without the threshold this would be a "board".
+    img = np.full((600, 800, 3), 128, np.uint8)
+    cv2.circle(img, (400, 300), 120, (60, 90, 200), -1)
+    cv2.rectangle(img, (100, 80), (700, 520), (40, 40, 40), 3)
+    assert detect_board(img) is None
+
 
 def test_crop_shapes_and_grid():
     img, corners, _ = synthetic(1)
